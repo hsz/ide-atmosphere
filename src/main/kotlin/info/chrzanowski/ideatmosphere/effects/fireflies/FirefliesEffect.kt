@@ -4,6 +4,7 @@ import info.chrzanowski.ideatmosphere.core.AdsrEnvelope
 import info.chrzanowski.ideatmosphere.core.AtmosphereEffect
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
 import info.chrzanowski.ideatmosphere.core.AtmospherePalette
+import info.chrzanowski.ideatmosphere.core.AtmosphereReactionProfile
 import info.chrzanowski.ideatmosphere.core.EffectContext
 import info.chrzanowski.ideatmosphere.render.DirtyRegionCollector
 import java.awt.Color
@@ -50,6 +51,7 @@ class FirefliesEffect : AtmosphereEffect {
 
     private var intensity: Float = 1f
     private var speedScale: Float = 1f
+    private var populationChanged = false
 
     private val x = FloatArray(MAX_PARTICLES)
     private val y = FloatArray(MAX_PARTICLES)
@@ -105,7 +107,8 @@ class FirefliesEffect : AtmosphereEffect {
         attackSeconds = 0.1f,
         decaySeconds = GLOW_SECONDS,
         sustainRatio = 0f,
-        releaseSeconds = 0f
+        releaseSeconds = 0f,
+        oneShot = true,
     )
 
     private var started = false
@@ -120,7 +123,7 @@ class FirefliesEffect : AtmosphereEffect {
         particleCount = 0
         lastWidth = -1
         lastHeight = -1
-        speedMultiplier = 1f
+        speedMultiplier = speedScale
         glow = 0f
         // Reset envelopes to idle at rest level
         speedEnvelope.release()
@@ -143,12 +146,21 @@ class FirefliesEffect : AtmosphereEffect {
     }
 
     override fun setIntensity(scale: Float) {
-        intensity = scale
+        val value = if (scale.isFinite()) scale.coerceIn(0.3f, 2f) else 1f
+        if (intensity == value) return
+        intensity = value
+        populationChanged = true
     }
 
     override fun setSpeedScale(scale: Float) {
-        speedScale = scale
-        speedEnvelope.restLevel = NORMAL_SPEED * speedScale
+        speedScale = if (scale.isFinite()) scale.coerceIn(0.3f, 2f) else 1f
+        speedMultiplier = speedEnvelope.value * speedScale
+    }
+
+    override fun onReactionProfileChanged(profile: AtmosphereReactionProfile) {
+        val normalized = profile.normalized(AtmosphereReactionProfile.fireflies())
+        speedEnvelope.configure(normalized.movement)
+        glowEnvelope.configure(normalized.successPulse)
     }
 
     override fun onEvent(event: AtmosphereEvent) {
@@ -163,19 +175,20 @@ class FirefliesEffect : AtmosphereEffect {
     }
 
     override fun update(deltaSeconds: Float, bounds: Rectangle, dirty: DirtyRegionCollector): Boolean {
-        if (!started || deltaSeconds <= 0f || bounds.width <= 0 || bounds.height <= 0) return false
+        if (!started || !deltaSeconds.isFinite() || deltaSeconds <= 0f || bounds.width <= 0 || bounds.height <= 0) return false
         val bx = bounds.x.toFloat()
         val by = bounds.y.toFloat()
         val bw = bounds.width.toFloat()
         val bh = bounds.height.toFloat()
 
         var changed = false
-        if (bounds.width != lastWidth || bounds.height != lastHeight) {
+        if (populationChanged || bounds.width != lastWidth || bounds.height != lastHeight) {
             changed = resize(bounds, dirty)
+            populationChanged = false
         }
 
         // Smooth global modifiers.
-        speedMultiplier = speedEnvelope.advance(deltaSeconds)
+        speedMultiplier = speedEnvelope.advance(deltaSeconds) * speedScale
         glow = glowEnvelope.advance(deltaSeconds)
         val glowBoost = 1f + glow * GLOW_ALPHA_BOOST
         val opacityScale = palette.opacityScale
@@ -190,16 +203,16 @@ class FirefliesEffect : AtmosphereEffect {
             }
 
             // Heading wander + damping of any impulse back toward the cruise speed.
-            wanderPhase[i] += wanderRate[i] * deltaSeconds
-            heading[i] += sin(wanderPhase[i]) * WANDER_TURN_RATE * deltaSeconds
+            wanderPhase[i] += wanderRate[i] * deltaSeconds * speedScale
+            heading[i] += sin(wanderPhase[i]) * WANDER_TURN_RATE * deltaSeconds * speedScale
             val cruise = speed[i] * speedMultiplier
             val cx = cos(heading[i]) * cruise
             val cy = sin(heading[i]) * cruise
             val damp = min(1f, deltaSeconds * IMPULSE_DAMPING)
             vx[i] += (cx - vx[i]) * damp
             vy[i] += (cy - vy[i]) * damp
-            bobPhase[i] += BOB_RATE * deltaSeconds
-            val bob = cos(bobPhase[i]) * BOB_AMPLITUDE * uiScale
+            bobPhase[i] += BOB_RATE * deltaSeconds * speedScale
+            val bob = cos(bobPhase[i]) * BOB_AMPLITUDE * uiScale * speedScale
 
             x[i] += vx[i] * deltaSeconds
             y[i] += (vy[i] + bob) * deltaSeconds
@@ -215,7 +228,7 @@ class FirefliesEffect : AtmosphereEffect {
             phase[i] += pulseRate[i] * deltaSeconds
             val pulse = 0.65f + 0.35f * sin(phase[i])
             val envelope = lifeEnvelope(life[i], maxLife[i])
-            alpha[i] = min(1f, baseAlpha[i] * pulse * envelope * opacityScale * glowBoost)
+            alpha[i] = min(1f, baseAlpha[i] * intensity * pulse * envelope * opacityScale * glowBoost)
 
             val moved = abs(x[i] - prevX[i]) >= MOVE_EPSILON || abs(y[i] - prevY[i]) >= MOVE_EPSILON
             val faded = alphaIndex(alpha[i]) != alphaIndex(prevAlpha[i])
@@ -332,7 +345,7 @@ class FirefliesEffect : AtmosphereEffect {
         wanderRate[i] = 0.3f + random.nextFloat() * 0.5f
         bobPhase[i] = random.nextFloat() * TWO_PI
         size[i] = (MIN_SIZE + random.nextFloat() * (MAX_SIZE - MIN_SIZE)) * uiScale
-        baseAlpha[i] = (MIN_BASE_ALPHA + random.nextFloat() * (MAX_BASE_ALPHA - MIN_BASE_ALPHA)) * intensity
+        baseAlpha[i] = MIN_BASE_ALPHA + random.nextFloat() * (MAX_BASE_ALPHA - MIN_BASE_ALPHA)
         phase[i] = random.nextFloat() * TWO_PI
         pulseRate[i] = MIN_PULSE_RATE + random.nextFloat() * (MAX_PULSE_RATE - MIN_PULSE_RATE)
         life[i] = 0f

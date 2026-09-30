@@ -46,6 +46,9 @@ interface AtmosphereEffect {
     /** The theme changed; rebuild cached colors here, never inside [paint]. Default no-op. */
     fun onPaletteChanged(palette: AtmospherePalette) {}
 
+    /** Applies the shared reaction timings without restarting the effect. */
+    fun onReactionProfileChanged(profile: AtmosphereReactionProfile) {}
+
     /**
      * Updates the intensity of the effect.
      * @param scale Expected in roughly [0.3, 2.0], where 1.0 is the default.

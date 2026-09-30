@@ -198,6 +198,16 @@ class AtmosphereManager(
      */
     @RequiresEdt
     fun endActivity(project: Project, success: Boolean) {
+        finishActivity(project, if (success) AtmosphereEvent.SUCCESS else AtmosphereEvent.FAILURE)
+    }
+
+    /** Ends activity without a success/failure reaction, for cancellation or an unknown outcome. */
+    @RequiresEdt
+    fun endActivity(project: Project) {
+        finishActivity(project, null)
+    }
+
+    private fun finishActivity(project: Project, outcome: AtmosphereEvent?) {
         if (disposed) return
         val state = AtmosphereSettingsState.getInstance().state
         if (!state.reactToActivity) return
@@ -214,7 +224,7 @@ class AtmosphereManager(
             publish(AtmosphereEvent.ACTIVITY_FINISHED, project)
         }
 
-        publish(if (success) AtmosphereEvent.SUCCESS else AtmosphereEvent.FAILURE, project)
+        if (outcome != null) publish(outcome, project)
     }
 
     /** Recomputes the palette from the current LaF and pushes it to every attached effect. */
@@ -267,6 +277,7 @@ class AtmosphereManager(
             val atmosphere = registration.atmosphere ?: continue
             atmosphere.effect.setIntensity(state.intensity)
             atmosphere.effect.setSpeedScale(state.speed)
+            atmosphere.effect.onReactionProfileChanged(state.reactionProfile())
         }
 
         // 3. React to activity
@@ -312,6 +323,7 @@ class AtmosphereManager(
         val state = AtmosphereSettingsState.getInstance().state
         registration.effect.setIntensity(state.intensity)
         registration.effect.setSpeedScale(state.speed)
+        registration.effect.onReactionProfileChanged(state.reactionProfile())
         val atmosphere = FrameAtmosphere(
             rootPane = registration.rootPane,
             effect = registration.effect,

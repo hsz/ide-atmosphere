@@ -35,7 +35,19 @@ languages. The overlay is a `Painter` on the frame's existing `IdeGlassPaneImpl`
 ### Toggle
 
 `View | Appearance | Atmosphere` shows or hides the effect on all windows. The choice is persisted across restarts
-(`PropertiesComponent`, key `ide.atmosphere.enabled`, default on). There is no settings page yet.
+(`PropertiesComponent`, key `ide.atmosphere.enabled`, default on).
+
+### Settings
+
+Open `Settings | Appearance & Behavior | Atmosphere` to choose Fireflies or Sakura, adjust intensity and speed
+(`0.3–2.0`), and control activity reactions and focus-loss fading. Intensity updates existing particle opacity and
+population on the next animation tick without requiring a resize; speed scales normal, idle and busy motion.
+
+Each theme has independent movement and success-pulse ADSR profiles: attack, decay and release durations
+(`0–10` seconds), and sustain ratio (`0–1`). Movement sustain is relative to normal motion; success pulses always
+return to zero after decay and release. Profile edits take effect without restarting the current theme's effect.
+Changes remain drafts until Apply; Reset reloads saved values, and Cancel discards unapplied edits.
+Both themes' profiles are persisted in `ide-atmosphere.xml`, even when the other theme is selected.
 
 ### Debug statistics
 
@@ -81,7 +93,7 @@ the ticker or the lifecycle code.
 ## Limitations (proof of concept)
 
 - No atmosphere on floating tool windows, detached editor windows, the Welcome screen, dialogs or popups.
-- No settings UI (intensity, speed, Reduce Motion); no other themes; only the idle/active event producer.
+- No dedicated Reduce Motion setting; activity integration does not observe every Gradle/Maven invocation.
 - While the overlay is visible, ordinary IDE repaints pay a ≈ 5–10 % overhead (the same as IDE background images).
 - CPU cost (1512×949 @2x, 24 fireflies): ≈ 8–11 % of one core while the user is active at 20–24 FPS (smoothness was
   deliberately prioritised over the original 3 % target), ≈ 6 % while the user is idle (15 FPS, half speed), 0 %

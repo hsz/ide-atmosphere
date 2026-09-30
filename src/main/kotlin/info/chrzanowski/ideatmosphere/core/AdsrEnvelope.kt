@@ -1,7 +1,6 @@
 package info.chrzanowski.ideatmosphere.core
 
 import kotlin.math.max
-import kotlin.math.min
 
 /**
  * A generic, allocation-free attack/decay/sustain/release envelope over a single [Float] value.
@@ -11,13 +10,20 @@ import kotlin.math.min
  */
 class AdsrEnvelope(
     restLevel: Float = 0f,
-    private val attackSeconds: Float,
-    private val decaySeconds: Float,
-    private val sustainRatio: Float,
-    private val releaseSeconds: Float
+    private var attackSeconds: Float,
+    private var decaySeconds: Float,
+    private var sustainRatio: Float,
+    private var releaseSeconds: Float,
+    private val oneShot: Boolean = false
 ) {
+    init {
+        require(restLevel.isFinite())
+        validateSettings(attackSeconds, decaySeconds, sustainRatio, releaseSeconds)
+    }
+
     var restLevel: Float = restLevel
         set(newValue) {
+            require(newValue.isFinite())
             field = newValue
             if (phase == Phase.IDLE) {
                 value = newValue
@@ -44,26 +50,39 @@ class AdsrEnvelope(
     private var phaseElapsed: Float = 0f
     private var phaseDuration: Float = 0f
 
+    /** Updates settings without jumping the [value], restarting the active segment when changed. */
+    fun configure(settings: EnvelopeSettings) {
+        validateSettings(settings.attackSeconds, settings.decaySeconds, settings.sustainRatio, settings.releaseSeconds)
+        if (attackSeconds == settings.attackSeconds && decaySeconds == settings.decaySeconds &&
+            sustainRatio == settings.sustainRatio && releaseSeconds == settings.releaseSeconds
+        ) return
+
+        attackSeconds = settings.attackSeconds
+        decaySeconds = settings.decaySeconds
+        sustainRatio = settings.sustainRatio
+        releaseSeconds = settings.releaseSeconds
+
+        when (phase) {
+            Phase.IDLE -> Unit
+            Phase.ATTACK -> startPhase(Phase.ATTACK, peakLevel, attackSeconds)
+            Phase.DECAY, Phase.SUSTAIN -> enterDecay()
+            Phase.RELEASE -> startPhase(Phase.RELEASE, restLevel, releaseSeconds)
+        }
+    }
+
     /**
      * Starts (or restarts) the attack phase from the current [value] toward [peak] over [attackSeconds].
-     * Once reached, moves to [Phase.DECAY] toward `peak * sustainRatio` over [decaySeconds],
-     * then [Phase.SUSTAIN].
+     * Once reached, moves to [Phase.DECAY] toward `rest + (peak - rest) * sustainRatio`
+     * over [decaySeconds], then [Phase.SUSTAIN] or [Phase.RELEASE] for a one-shot envelope.
      *
      * Retriggering while already in a non-idle phase continues smoothly from the current [value]
      * toward the new peak.
      */
     fun trigger(peak: Float) {
+        require(peak.isFinite())
         peakLevel = peak
-        startLevel = value
-        targetLevel = peak
-        phaseElapsed = 0f
-        phaseDuration = max(0f, attackSeconds)
-        phase = Phase.ATTACK
-
-        if (phaseDuration == 0f) {
-            value = targetLevel
-            enterDecay()
-        }
+        startPhase(Phase.ATTACK, peak, attackSeconds)
+        resolveInstantPhases()
     }
 
     /**
@@ -72,45 +91,30 @@ class AdsrEnvelope(
      */
     fun release() {
         if (phase == Phase.IDLE) return
-        startLevel = value
-        targetLevel = restLevel
-        phaseElapsed = 0f
-        phaseDuration = max(0f, releaseSeconds)
-        phase = Phase.RELEASE
-
-        if (phaseDuration == 0f) {
-            value = targetLevel
-            phase = Phase.IDLE
-        }
+        startPhase(Phase.RELEASE, restLevel, releaseSeconds)
+        resolveInstantPhases()
     }
 
     /**
      * Advances the state machine by [deltaSeconds], updates and returns [value].
-     * Allocation-free and safe for zero or negative [deltaSeconds].
+     * Allocation-free and safe for zero, negative or non-finite [deltaSeconds].
      * Zero duration phases are treated as instant jumps.
      */
     fun advance(deltaSeconds: Float): Float {
-        if (deltaSeconds <= 0f || phase == Phase.IDLE || phase == Phase.SUSTAIN) return value
+        if (!deltaSeconds.isFinite() || deltaSeconds <= 0f || phase == Phase.IDLE || phase == Phase.SUSTAIN) return value
 
         var remaining = deltaSeconds
-        while (remaining > 0f && phase != Phase.IDLE && phase != Phase.SUSTAIN) {
+        while (phase != Phase.IDLE && phase != Phase.SUSTAIN) {
             val timeLeft = phaseDuration - phaseElapsed
             if (timeLeft <= 0f || remaining >= timeLeft) {
                 remaining -= max(0f, timeLeft)
                 value = targetLevel
-                when (phase) {
-                    Phase.ATTACK -> enterDecay()
-                    Phase.DECAY -> enterSustain()
-                    Phase.RELEASE -> {
-                        phase = Phase.IDLE
-                        remaining = 0f
-                    }
-                    else -> remaining = 0f
-                }
+                finishPhase()
             } else {
+                if (remaining <= 0f) break
                 phaseElapsed += remaining
                 val t = phaseElapsed / phaseDuration
-                value = startLevel + (targetLevel - startLevel) * t
+                value = (startLevel.toDouble() + (targetLevel.toDouble() - startLevel) * t).toFloat()
                 remaining = 0f
             }
         }
@@ -118,20 +122,39 @@ class AdsrEnvelope(
     }
 
     private fun enterDecay() {
-        startLevel = value
-        targetLevel = peakLevel * sustainRatio
-        phaseElapsed = 0f
-        phaseDuration = max(0f, decaySeconds)
-        phase = Phase.DECAY
+        val sustainLevel = (restLevel.toDouble() + (peakLevel.toDouble() - restLevel) * sustainRatio).toFloat()
+        startPhase(Phase.DECAY, sustainLevel, decaySeconds)
+    }
 
-        if (phaseDuration == 0f) {
+    private fun startPhase(newPhase: Phase, target: Float, duration: Float) {
+        startLevel = value
+        targetLevel = target
+        phaseElapsed = 0f
+        phaseDuration = max(0f, duration)
+        phase = newPhase
+    }
+
+    private fun resolveInstantPhases() {
+        while (phase != Phase.IDLE && phase != Phase.SUSTAIN && phaseDuration == 0f) {
             value = targetLevel
-            enterSustain()
+            finishPhase()
         }
     }
 
-    private fun enterSustain() {
-        value = targetLevel
-        phase = Phase.SUSTAIN
+    private fun finishPhase() {
+        when (phase) {
+            Phase.ATTACK -> enterDecay()
+            Phase.DECAY -> {
+                if (oneShot) startPhase(Phase.RELEASE, restLevel, releaseSeconds)
+                else phase = Phase.SUSTAIN
+            }
+            Phase.RELEASE -> phase = Phase.IDLE
+            else -> Unit
+        }
+    }
+
+    private fun validateSettings(attack: Float, decay: Float, sustain: Float, release: Float) {
+        require(attack.isFinite() && decay.isFinite() && release.isFinite())
+        require(sustain.isFinite() && sustain in 0f..1f)
     }
 }

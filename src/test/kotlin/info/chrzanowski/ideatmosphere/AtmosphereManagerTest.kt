@@ -3,14 +3,17 @@ package info.chrzanowski.ideatmosphere
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.mock.MockProject
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.impl.IdeGlassPaneImpl
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.util.ui.UIUtil
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
 import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
+import info.chrzanowski.ideatmosphere.effects.fireflies.FirefliesEffect
+import info.chrzanowski.ideatmosphere.effects.sakura.SakuraEffect
+import info.chrzanowski.ideatmosphere.render.DirtyRegionCollector
 import info.chrzanowski.ideatmosphere.settings.AtmosphereSettingsState
+import java.awt.Rectangle
 import javax.swing.JRootPane
 
 class AtmosphereManagerTest : BasePlatformTestCase() {
@@ -329,6 +332,19 @@ class AtmosphereManagerTest : BasePlatformTestCase() {
         assertEquals(listOf(AtmosphereEvent.SUCCESS, AtmosphereEvent.ACTIVITY_STARTED), first.effect.events)
     }
 
+    fun `test neutral completion releases activity without an outcome reaction`() {
+        attachFirst()
+        manager.beginActivity(project)
+        manager.beginActivity(project)
+        manager.endActivity(project)
+        assertEquals(listOf(AtmosphereEvent.ACTIVITY_STARTED), first.effect.events)
+
+        manager.endActivity(project)
+        assertEquals(listOf(AtmosphereEvent.ACTIVITY_STARTED, AtmosphereEvent.ACTIVITY_FINISHED), first.effect.events)
+        manager.endActivity(project)
+        assertEquals(2, first.effect.events.size)
+    }
+
     fun `test reactToActivity setting suppresses all activity events`() {
         attachFirst()
         AtmosphereSettingsState.getInstance().state.reactToActivity = false
@@ -399,6 +415,53 @@ class AtmosphereManagerTest : BasePlatformTestCase() {
 
         assertEquals(0.5f, first.effect.lastIntensity)
         assertEquals(1.5f, first.effect.lastSpeedScale)
+    }
+
+    fun `test profiles reach every frame on attach and apply without restarting`() {
+        val state = AtmosphereSettingsState.getInstance().state
+        state.reactionProfile().movement.attackSeconds = 2f
+        attachFirst()
+        assertEquals(state.reactionProfile(), first.effect.lastReactionProfile)
+
+        val otherProject = MockProject(null, testRootDisposable)
+        try {
+            manager.attach(otherProject, second.rootPane, second.parent, second.effect)
+            assertEquals(state.reactionProfile(), second.effect.lastReactionProfile)
+            state.reactionProfile().successPulse.sustainRatio = 0.5f
+            manager.applySettings()
+            assertEquals(state.reactionProfile(), first.effect.lastReactionProfile)
+            assertEquals(state.reactionProfile(), second.effect.lastReactionProfile)
+            assertEquals(1, first.effect.startCount)
+            assertEquals(1, second.effect.startCount)
+        } finally {
+            manager.detach(otherProject)
+        }
+    }
+
+    fun `test theme replacement uses the same shared profile`() {
+        val state = AtmosphereSettingsState.getInstance().state
+        state.reactionProfile().movement.attackSeconds = 0f
+        state.reactionProfile().movement.decaySeconds = 0f
+        state.reactionProfile().movement.sustainRatio = 0.5f
+        val profile = state.reactionProfile().deepCopy()
+        attachFirst()
+        assertEquals(profile, first.effect.lastReactionProfile)
+        state.effectId = "sakura"
+        manager.applySettings()
+
+        val effect = manager.atmosphereFor(project)!!.effect as SakuraEffect
+        effect.onEvent(AtmosphereEvent.ACTIVITY_STARTED)
+        effect.update(0.01f, Rectangle(0, 0, 800, 600), DirtyRegionCollector(100))
+        assertEquals(1.3f, effect.speedMultiplier, 0.001f)
+        assertEquals(profile, state.reactionProfile())
+
+        state.effectId = "fireflies"
+        manager.applySettings()
+        val fireflies = manager.atmosphereFor(project)!!.effect as FirefliesEffect
+        fireflies.onEvent(AtmosphereEvent.ACTIVITY_STARTED)
+        fireflies.update(0.01f, Rectangle(0, 0, 800, 600), DirtyRegionCollector(100))
+        assertEquals(1f + (FirefliesEffect.ACTIVITY_SPEED - 1f) * 0.5f, fireflies.speedMultiplier, 0.001f)
+        assertEquals(profile, state.reactionProfile())
     }
 
     fun `test reactToActivity=false stops the idle producer`() {

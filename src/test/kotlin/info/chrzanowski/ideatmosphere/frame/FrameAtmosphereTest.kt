@@ -239,8 +239,8 @@ class FrameAtmosphereTest : BasePlatformTestCase() {
         Rectangle(1000, 1000, 20, 20),
         Rectangle(2000, 2000, 20, 20),
         Rectangle(3000, 3000, 20, 20),
-        Rectangle(4000, 4000, 20, 20),
-        Rectangle(5000, 1000, 20, 20),
+        Rectangle(4000, 3500, 20, 20),
+        Rectangle(5000, 1500, 20, 20),
     )
 
     private fun addFiveSpreadRegions() {

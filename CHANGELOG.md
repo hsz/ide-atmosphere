@@ -6,6 +6,7 @@
 
 ### Added
 
+- Independent, persisted Fireflies and Sakura movement/success ADSR profiles with editable settings, isolated drafts, Apply/Reset/Cancel coverage and XML serialization tests.
 - Platform investigation write-up (`docs/overlay-investigation.md`) documenting the glass-pane painter approach, repaint cost measurements and rejected alternatives.
 - Effect-agnostic core contracts: `AtmosphereEffect`, `AtmosphereEvent`, `AtmospherePalette`, `EffectContext`.
 - Plugin metadata and `AtmosphereBundle` message bundle.
@@ -29,4 +30,5 @@
 
 ### Fixed
 
+- Intensity changes now immediately affect existing particle opacity and reconcile population on the next tick, clearing removed particles without a resize. Speed scales normal, idle and busy motion independently of reaction envelopes.
 - Fireflies hopped from pixel to pixel (whole device pixels on Retina) instead of gliding: positions were rounded to integers, dirty regions were reported only when the rounded position changed, and the governor sat at a 10 FPS floor (6 FPS idle, 4 FPS in the background). `FirefliesEffect` now renders a reused `Ellipse2D.Float` at float centres and radii (relying on the painter's `STROKE_PURE`), reports a region for every visible sub-pixel move (`MOVE_EPSILON = 0.02 px`, 256 alpha steps) and runs at 20–30 FPS.

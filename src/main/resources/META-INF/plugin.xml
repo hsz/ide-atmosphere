@@ -37,6 +37,9 @@
                 instance="info.chrzanowski.ideatmosphere.settings.AtmosphereSettingsConfigurable"
                 id="info.chrzanowski.ideatmosphere.settings.AtmosphereSettingsConfigurable"
                 displayName="Atmosphere"/>
+
+        <externalSystemTaskNotificationListener
+                implementation="info.chrzanowski.ideatmosphere.events.ExternalSystemActivityProducer"/>
     </extensions>
 
     <applicationListeners>
