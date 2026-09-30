@@ -1,42 +1,119 @@
-# Ide-atmosphere
+# IDE Atmosphere
 
 [![Twitter Follow](https://img.shields.io/badge/follow-%40JBPlatform-1DA1F2?logo=twitter)](https://twitter.com/JBPlatform)
 [![Developers Forum](https://img.shields.io/badge/JetBrains%20Platform-Join-blue)][jb:forum]
 
 ## Overview
 
-This repository implements an IntelliJ Platform plugin.
+IDE Atmosphere is an IntelliJ Platform plugin that paints a subtle, animated *fireflies* particle field across the
+whole project frame (editor, tool windows, header and status bar) without ever touching input, editor content, PSI or
+languages. The overlay is a `Painter` on the frame's existing `IdeGlassPaneImpl`; see
+[docs/overlay-investigation.md](./docs/overlay-investigation.md) for the platform investigation behind that choice.
+
+## What it does
+
+- **Fireflies on every project window.** 20–50 slow, low-opacity, gently pulsing particles drift over the whole
+  `IdeFrame` — editor, tool windows, empty editor area, toolbar/header band and status bar. The count scales with
+  the window area and the field is rebuilt on resize.
+- **Never in the way.** The overlay is a `Painter` on the frame's existing `IdeGlassPaneImpl`: it has no AWT
+  listeners, is not enabled as an input target and never changes the cursor. Popups, completion, Search Everywhere,
+  dialogs and floating tool windows are separate windows, so particles always stay behind them.
+- **Theme aware.** Palette derived from the current LaF (`JBColor.isBright()` + panel background luminance) and
+  refreshed on theme change: warm amber on dark themes, deeper amber on light ones.
+- **Smooth.** Fireflies are rendered at sub-pixel positions (float geometry, antialiasing, `STROKE_PURE`) at a
+  governed 20–30 FPS with real `deltaTime`, so they glide instead of hopping between pixels.
+- **Reacts to the IDE.** A generic `AtmosphereEvent` seam (`ACTIVITY_STARTED/FINISHED`, `SUCCESS`, `FAILURE`,
+  `USER_ACTIVE`, `USER_IDLE`); the PoC wires one producer — after 30 s without input (`IdleTracker`) the fireflies
+  calm down to half speed and the animation drops to 15 FPS (same pixels per frame); the first user event restores
+  normal motion.
+- **Cheap when unattended.** One small repaint rectangle per moved firefly, all painted in a single back-buffer
+  flush (never a whole-window repaint during animation); an adaptive governor keeps the tick cost under ≈ 10 % of
+  one core by lowering the rate to 20 FPS first. When the IDE application is deactivated the atmosphere fades out
+  over 0.5 s and the animation timer stops (0 % CPU) until activation fades it back in; fully frozen while the frame
+  is hidden or iconified or Power Save mode is on.
+
+### Toggle
+
+`View | Appearance | Atmosphere` shows or hides the effect on all windows. The choice is persisted across restarts
+(`PropertiesComponent`, key `ide.atmosphere.enabled`, default on). There is no settings page yet.
+
+### Debug statistics
+
+Start the IDE with `-Dide.atmosphere.debug=true` (the `runIde` Gradle task sets it) and every 10 s `idea.log` gets a
+line such as
+
+```
+atmosphere: ticks=218 fps=21.7 (governed 24, normal) tick avg=4295µs max=22708µs rects/tick=9.8 (nested 8.8, direct 1.0) px/tick=86541 cpu≈9.34%
+```
+
+— ticks in the period, effective and governed FPS, rate mode (`normal` / `calm` / `fading`), tick cost, repaint
+rectangles per tick split into those painted inside the nested single-flush batch (`nested`) and directly
+(`direct`; a healthy batch shows `nested ≈ rects − 1`), painted user-space pixels per tick, and the tick cost as a
+share of one core. No lines are logged while the atmosphere is dormant (application deactivated).
+
+## Architecture
+
+```
+AtmosphereProjectActivity ──attach──▶ AtmosphereManager (app service)
+AtmosphereProjectService ──dispose─▶   │  frame registry · shared AtmosphereTicker · isEnabled · pause reasons
+LafManager / PowerSave / Activation ──▶ │  publish(event) fan-out · IdleActivityProducer (IdleTracker.events)
+ToggleAtmosphereAction ──isEnabled──▶  │
+                                        ▼
+                         FrameAtmosphere (one per IdeFrame)
+                           effect.update(dt) ──▶ DirtyRegionCollector ──▶ contentPane.paintImmediately(rect 1)
+                                                                      │     └─▶ painter hook ──▶ paintImmediately(rects 2..n) nested
+                                                                      └─▶ rootPane.repaint(header rect)
+                           IdeGlassPaneImpl ──▶ AtmospherePainter (opacity, depth ≤ 2) ──▶ effect.paint(g, clip)
+```
+
+| Package | Contents |
+|---|---|
+| `core` | `AtmosphereEffect`, `AtmosphereEvent`, `AtmospherePalette`, `EffectContext` — effect-agnostic, Swing-only contracts |
+| `render` | `AtmospherePainter` (glass-pane painter with fade opacity and the one-shot nested-paint hook), `DirtyRegionCollector` (cost-model region merging), `FrameBudgetGovernor` (adaptive 20–30 FPS), `AtmosphereTicker` (shared Swing timer, calm mode, dormant notification), `AtmosphereStats` |
+| `frame` | `FrameAtmosphere` — one effect on one root pane, nested batch repaint routing, fade-out/fade-in and dormancy |
+| `effects` | `AtmosphereEffects` registry, `fireflies/FirefliesEffect` (structure-of-arrays, allocation-free hot path) |
+| `project`, `listeners`, `events`, `actions` | Lifecycle wiring, platform listeners, `IdleActivityProducer`, `ToggleAtmosphereAction` |
+
+Adding another atmosphere means implementing `AtmosphereEffect` and registering it in `AtmosphereEffects`; adding an
+IDE integration means publishing `AtmosphereEvent`s through `AtmosphereManager.publish`. Neither touches the painter,
+the ticker or the lifecycle code.
+
+## Limitations (proof of concept)
+
+- No atmosphere on floating tool windows, detached editor windows, the Welcome screen, dialogs or popups.
+- No settings UI (intensity, speed, Reduce Motion); no other themes; only the idle/active event producer.
+- While the overlay is visible, ordinary IDE repaints pay a ≈ 5–10 % overhead (the same as IDE background images).
+- CPU cost (1512×949 @2x, 24 fireflies): ≈ 8–11 % of one core while the user is active at 20–24 FPS (smoothness was
+  deliberately prioritised over the original 3 % target), ≈ 6 % while the user is idle (15 FPS, half speed), 0 %
+  while the IDE application is deactivated. Measurements are recorded in
+  [docs/overlay-investigation.md](./docs/overlay-investigation.md) §10.
+- The single-flush saving of the nested batch repaint needs Swing's `BufferStrategyPaintManager`
+  (`swing.bufferPerWindow=true`; verified on macOS/Metal). On other pipelines every rectangle pays its own blit and
+  the governor settles at 20 FPS.
+
+## Development
+
+| Command | Purpose |
+|---|---|
+| `./gradlew test` | Unit tests (collector, governor, fireflies, idle producer) and platform tests (`BasePlatformTestCase`) |
+| `./gradlew runIde` | Sandbox IDE with the plugin and debug statistics enabled |
+| `./gradlew verifyPlugin` | Plugin Verifier against the configured IDE versions |
+| `./gradlew build` | Compile, test and package |
 
 ## Plugin structure
 
-A generated project contains the following content structure:
-
 ```
 .
-├── .run/                   Predefined Run/Debug Configurations
-├── gradle
-│   ├── wrapper/            Gradle Wrapper
-│   ├── libs.versions.toml  Version catalog
-├── src                     Plugin sources
-│   └── main
-│       ├── kotlin/         Kotlin production sources
-│       └── resources/      Plugin resources
-│           ├── META-INF/   Plugin configuration file and logo
-│           └── messages/   Message bundles
-├── .gitignore              Git ignoring rules
-├── build.gradle.kts        Gradle build configuration
-├── gradle.properties       Gradle configuration properties
-├── gradlew                 *nix Gradle Wrapper script
-├── gradlew.bat             Windows Gradle Wrapper script
-├── README.md               This file
-└── settings.gradle.kts     Gradle project settings
+├── docs/overlay-investigation.md   Platform investigation and measurements
+├── src/main/kotlin/info/chrzanowski/ideatmosphere/
+│   ├── core/ · render/ · frame/ · effects/ · project/ · listeners/ · events/ · actions/
+│   ├── AtmosphereBundle.kt · AtmosphereManager.kt
+├── src/main/resources/META-INF/plugin.xml   Plugin manifest (activity, listeners, action)
+├── src/main/resources/messages/             Message bundle
+├── src/test/kotlin/...                      Tests mirroring the main packages
+├── build.gradle.kts · settings.gradle.kts · gradle/libs.versions.toml
+└── CHANGELOG.md · README.md
 ```
-
-In addition to the configuration files, the most crucial part is the `src` directory, which contains our implementation
-and the manifest for our plugin – [plugin.xml][file:plugin.xml].
-
-> [!NOTE]
-> To use Java in your plugin, create the `/src/main/java` directory.
 
 The plugin logo is placed in `src/main/resources/META-INF/pluginIcon.svg`.
 See [Plugin Logo][docs:logo] for more information and logo requirements.

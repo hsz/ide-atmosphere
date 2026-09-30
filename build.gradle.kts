@@ -9,6 +9,12 @@ plugins {
 // Read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin.html
 dependencies {
     testImplementation(libs.junit)
+    // Virtual-time testing of the idle producer; the platform already bundles kotlinx-coroutines-core, so only the
+    // test artifact is added and its transitive core dependency is excluded to avoid a duplicate on the classpath.
+    testImplementation(libs.kotlinx.coroutines.test) {
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core-jvm")
+    }
 
     // IntelliJ Platform Gradle Plugin Dependencies Extension - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-dependencies-extension.html
     intellijPlatform {
@@ -17,5 +23,12 @@ dependencies {
 
         // Add plugin dependencies for compilation here, for example:
         // bundledPlugin("com.intellij.java")
+    }
+}
+
+tasks {
+    runIde {
+        // Periodic FPS / tick-cost / repaint statistics in the sandbox idea.log (see AtmosphereStats).
+        jvmArgs("-Dide.atmosphere.debug=true")
     }
 }

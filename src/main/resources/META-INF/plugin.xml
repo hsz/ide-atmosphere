@@ -5,26 +5,49 @@
 
     <!-- Public plugin name should be written in Title Case.
      Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-name -->
-    <name>Ide-atmosphere</name>
+    <name>IDE Atmosphere</name>
 
     <!-- A displayed Vendor name or Organization ID displayed on the Plugins Page. -->
-    <vendor url="https://www.yourcompany.com">YourCompany</vendor>
+    <vendor url="https://chrzanowski.info">Jakub Chrzanowski</vendor>
 
     <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
     <description><![CDATA[
-        Enter short description for your plugin here.<br>
-        <em>most HTML tags may be used</em>
+        Paints a subtle, animated <em>fireflies</em> particle field across the whole IDE window &mdash; editor,
+        tool windows, toolbar and status bar &mdash; without ever touching input, editor content or languages.<br><br>
+        The atmosphere lives on the frame's glass pane, never intercepts mouse or keyboard events, adapts to Light
+        and Dark themes, calms down when you are idle, and pauses in Power Save mode or when the window is hidden.<br><br>
+        Toggle it via <b>View | Appearance | Atmosphere</b>.
         ]]></description>
 
     <!-- Product and plugin compatibility requirements.
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html -->
     <depends>com.intellij.modules.platform</depends>
 
+    <resource-bundle>messages.AtmosphereBundle</resource-bundle>
+
 
     <!-- Extensions defined by the plugin.
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
+        <postStartupActivity implementation="info.chrzanowski.ideatmosphere.project.AtmosphereProjectActivity"/>
     </extensions>
+
+    <applicationListeners>
+        <listener class="info.chrzanowski.ideatmosphere.listeners.AtmosphereLafListener"
+                  topic="com.intellij.ide.ui.LafManagerListener"/>
+        <listener class="info.chrzanowski.ideatmosphere.listeners.AtmospherePowerSaveListener"
+                  topic="com.intellij.ide.PowerSaveMode$Listener"/>
+        <listener class="info.chrzanowski.ideatmosphere.listeners.AtmosphereActivationListener"
+                  topic="com.intellij.openapi.application.ApplicationActivationListener"/>
+    </applicationListeners>
+
+    <actions>
+        <!-- View | Appearance | Atmosphere; text/description come from the resource bundle. -->
+        <action id="info.chrzanowski.ideatmosphere.ToggleAtmosphereAction"
+                class="info.chrzanowski.ideatmosphere.actions.ToggleAtmosphereAction">
+            <add-to-group group-id="UIToggleActions" anchor="last"/>
+        </action>
+    </actions>
 
 </idea-plugin>
