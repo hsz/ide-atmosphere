@@ -316,6 +316,54 @@ graph LR
 - **Greedy merge cost** grows quadratically with clusters; bounded by ≤ 50 particles (≈ 0.1 ms) and asserted in a test.
 - **`ApplicationActivationListener` semantics** (fires when focus leaves the IDE as a whole) are unchanged from the current build; two IDE frames do not fade each other out.
 
+# Next Milestone: Settings, Sakura Theme, Activity Events & CPU Tuning
+
+### Context
+The fireflies PoC (including the smoothness fix) is complete, committed and human-verified. The user reviewed the plan's explicitly deferred scope and picked the next slice: a Settings UI, a second interchangeable theme to prove the effect-agnostic architecture, real IDE-activity event producers (Run/Debug, background tasks, build) instead of only idle/active, and a pass at closing the active-CPU gap with the cheap levers already documented in §9/§10. The user also asked for reactions to ramp/decay using an ADSR (attack/decay/sustain/release) envelope shape instead of today's ad-hoc linear blends.
+
+### Decisions (from the user's answers)
+1. **Settings UI** exposes: Enable + theme picker, Intensity slider, Animation speed slider, "React to IDE activity", "Pause when IDE loses focus". Reduce Motion and "Reduce effects while typing" stay deferred.
+2. **Second theme = Sakura petals** (drifting + rotating), registered alongside Fireflies in `AtmosphereEffects` — the real test of whether the architecture supports interchangeable atmospheres.
+3. **Event producers** = Run/Debug (`ExecutionListener`), background tasks, and build — all three, feeding the existing `ACTIVITY_STARTED/FINISHED/SUCCESS/FAILURE` contract.
+4. **Reactions are reshaped with a generic `AdsrEnvelope`** (attack → decay → sustain while busy → release) instead of the current exponential blend/one-shot decay, shared by both effects.
+5. **CPU tuning** stays at "cheap documented levers" (recalibrate constants, no architectural change); the result is measured and reported honestly, not guaranteed to hit the original ≤3% idle target.
+
+### API grounding (checked against the current sources)
+- No stable, public, global "any background task started/finished" listener exists (`Task.Backgroundable` has no such hook). The most universally observable, fully public long-running background activity is indexing: `com.intellij.openapi.project.DumbService.DumbModeListener` (`enteredDumbMode`/`exitDumbMode`, project-level topic `DumbService.DUMB_MODE`) is used as the "background tasks" producer instead of guessing at an indicator-level hook; documented as a known under-approximation (non-indexing background work is not observed).
+- `com.intellij.execution.ExecutionListener` (project-level topic `ExecutionManager.EXECUTION_TOPIC`): `processStarted(executorId, env, handler)` / `processTerminated(executorId, env, handler, exitCode)` — exit code 0 → `SUCCESS`, non-zero → `FAILURE`.
+- `com.intellij.task.ProjectTaskListener` (project-level topic `ProjectTaskListener.TOPIC`): `started(context)` / `finished(context, result)`, `result.isAborted`/`hasErrors()` → `SUCCESS`/`FAILURE`. Covers the platform's unified build system (compiler, Gradle, …), not just the legacy `CompilerManager`.
+- All three are **project-level** listeners (`<projectListeners>` in `plugin.xml`), unlike the existing app-level `LafManagerListener`/`PowerSaveMode.Listener`/`ApplicationActivationListener`.
+- Overlapping activities (e.g. a build running while the user also starts Run) must not flicker `ACTIVITY_FINISHED` while another activity is still in flight: `AtmosphereManager` gains a small reference-counted aggregator per project that only publishes `ACTIVITY_STARTED` on a 0→1 transition and `ACTIVITY_FINISHED` on a 1→0 transition; `SUCCESS`/`FAILURE` are published as-is (not counted) since each producer's own outcome is meaningful on its own.
+
+### Proposed Changes
+**Settings (`settings/`)**
+- `AtmosphereSettingsState` (`@Service(APP)`, `PersistentStateComponent<State>`, `@State(name="AtmosphereSettings", storages=[Storage("ide-atmosphere.xml")])`): `State(effectId, intensity, speed, reactToActivity, pauseOnFocusLoss)`; `enabled` is **not** duplicated here — the panel's checkbox reads/writes `AtmosphereManager.isEnabled` directly.
+- `AtmosphereSettingsConfigurable` (`Configurable`, Kotlin UI DSL `panel { }`) under Appearance & Behavior: enable checkbox, theme `comboBox(AtmosphereEffects.ids)`, `intensity`/`speed` sliders (0.3–2.0, step 0.1), `reactToActivity`/`pauseOnFocusLoss` checkboxes; `isModified`/`apply`/`reset` diff against `AtmosphereSettingsState` + `AtmosphereManager.isEnabled`.
+- `AtmosphereEffect` contract gains two default-no-op methods: `fun setIntensity(scale: Float) {}`, `fun setSpeedScale(scale: Float) {}` (distinct from the event-driven speed target, which multiplies on top). `FirefliesEffect` applies `intensity` to `baseAlpha`/particle-count scaling and `speedScale` as the baseline multiplier under the ADSR-driven target.
+- `AtmosphereManager`: `Registration.effect` becomes replaceable; `setEffectId(id)` recreates every `FrameAtmosphere` with a fresh effect instance of the new id; a settings-changed hook pushes `intensity`/`speed`/`reactToActivity`/`pauseOnFocusLoss` to all registrations and gates the idle/activity producers and `setApplicationActive` accordingly.
+
+**Shared reaction envelope (`core/`)**
+- `AdsrEnvelope(restLevel, attackSeconds, decaySeconds, sustainRatio, releaseSeconds)`: `trigger(peak)` (attack → decay to `peak*sustainRatio`, holding), `release()` (→ `restLevel`), `advance(dt): Float`. Allocation-free (primitive fields only, no per-tick objects).
+- `FirefliesEffect.onEvent` is rewired onto two `AdsrEnvelope`s: one drives `speedMultiplier` (sustain while `ACTIVITY_STARTED`/`USER_IDLE` is active, release on `ACTIVITY_FINISHED`/`USER_ACTIVE`), one drives `glow` as a one-shot attack-decay pulse on `SUCCESS`. `FAILURE` keeps its physical velocity impulse (already decays via `IMPULSE_DAMPING`; not a good fit for an intensity envelope).
+
+**Sakura (`effects/sakura/`)**
+- `SakuraEffect`: structure-of-arrays like Fireflies plus `rotation`/`angularVelocity`; fall speed + sinusoidal horizontal sway ("breeze"); rendered as a reused `Path2D.Float` petal polygon recomputed from manual trig each paint (no `AffineTransform` allocation) and filled with a theme-aware pink/cream palette; respawns above the top edge when it falls past the bottom (petals enter from the top, unlike fireflies' edge-avoiding spawn). Reactions per the brief's atmosphere-reaction table: `ACTIVITY_STARTED` → stronger breeze (ADSR-driven sway amplitude), `SUCCESS` → brief glow/extra petals, `FAILURE` → gust impulse; `USER_IDLE`/`USER_ACTIVE` scale fall speed like Fireflies' `speedMultiplier`.
+- `AtmosphereEffects` registers `SakuraEffect.ID` alongside `FirefliesEffect.ID`; `DEFAULT_ID` stays `fireflies`.
+
+**Event producers (`events/`, `plugin.xml`)**
+- `ExecutionActivityProducer` (`ExecutionListener`), `DumbModeActivityProducer` (`DumbService.DumbModeListener`), `BuildActivityProducer` (`ProjectTaskListener`) — each translates its platform callbacks into `AtmosphereManager.publish(event, project)` calls through the new per-project activity aggregator.
+- `plugin.xml`: new `<projectListeners>` block for the three topics; settings `Configurable` and application service/state registration.
+
+**CPU tuning**
+- Re-measure `DirtyRegionCollector`'s fixed per-paint cost and `FrameBudgetGovernor` behaviour on the primary display with the app foregrounded; adjust `DEFAULT_FIXED_COST_NANOS`/`AREA_PER_PARTICLE`/`maxRects` from the fresh numbers; record the honest before/after in `docs/overlay-investigation.md` §11.
+
+### Risks
+- No public global "background task" listener exists — using dumb mode as a proxy under-reports activity that is not indexing (e.g. a long VCS operation); documented as a known limitation, not silently hidden.
+- Three new project-level listeners run per project; the activity aggregator must be reset on project close (`detach()`) to avoid a stuck "busy" count.
+- Mutable `Registration.effect` (for the theme picker) means switching themes tears down and recreates every `FrameAtmosphere`; must not leak the old effect's `stop()` or double-attach the painter.
+- `AdsrEnvelope` replacing the existing blend logic must keep the already-accepted motion smoothness (no regression risk for the sub-pixel/nested-batch work); covered by unit tests on the envelope itself plus the existing Fireflies dirty-region tests.
+- CPU tuning is measurement-driven and may again land above the aspirational 3%; report the real number rather than adjusting the target to match.
+
 # Testing
 
 ### Validation Approach
@@ -343,6 +391,12 @@ graph LR
 - Ticker: `calm` caps at 15 FPS (66 ms) and never raises the rate; `onAllDormant` fires once when every frame is dormant; fade ticks do not move `governor.averageTickMicros`.
 - Fireflies: painting one particle at `x = 10.0` and at `x = 10.5` into two `BufferedImage`s yields different coverage in the boundary columns (sub-pixel rendering proven); a 1/30 s tick reports (almost) every particle dirty; a 0.1 ms tick reports (almost) none; the “dirty regions cover every painted particle” pixel-diff test still passes with float geometry; colour tables have 256 entries.
 - Manager: `setApplicationActive(false)` keeps the ticker running while fading and stops it once all frames are dormant; `setApplicationActive(true)` restarts it; a frame attached while the application is inactive starts dormant.
+
+**Added by the next milestone**
+- `AdsrEnvelope`: attack rises toward the peak, decay settles to `peak*sustainRatio`, sustain holds while triggered again, release falls to `restLevel`; retriggering mid-attack/decay does not jump; a second `trigger` before `release` extends the sustain instead of restarting the attack.
+- Settings: `AtmosphereSettingsState` round-trips through `PersistentStateComponent` serialization with defaults when absent; the Configurable's `isModified`/`apply`/`reset` agree with the backing state and with `AtmosphereManager.isEnabled`.
+- Sakura: particle/rotation bounds after simulated updates, dt=0 emits nothing, sub-degree rotation changes produce different painted coverage, dirty regions cover every painted petal.
+- Activity aggregator: overlapping start/finish calls only emit one `ACTIVITY_STARTED`/`ACTIVITY_FINISHED` pair; `reactToActivity=false` suppresses all three new producers; project close resets the count.
 
 ### Edge Cases
 - `getIdeFrame(project)` returns null (headless/LightEdit) → activity does nothing, no exceptions.
@@ -447,4 +501,65 @@ The sandbox shows gliding fireflies at ≈ 30 FPS with `nested ≈ rects − 1`,
 - Visual check (human-assisted where needed): fireflies glide without hops in Dark and Light themes, no artifacts around repainted squares or at the rect-1 region, fade-out when switching to another app and fade-in on return.
 - Update `docs/overlay-investigation.md`: §3 (nested batching re-evaluated and adopted with the `RepaintManager.paintDepth` / `BufferStrategyPaintManager` reasoning), §6 (A–G measurement table), §8 architecture summary, §9 recommendations, new §10.3 “Smoothness fix” with before/after stats.
 - Update `README.md` (behaviour: 30 FPS, sub-pixel rendering, fade on deactivation, CPU expectations) and `CHANGELOG.md` (Fixed: pixel-snapped jumpy motion; Changed: repaint strategy, frame-rate policy, fade-out instead of 4 FPS throttle).
+- Run `./gradlew build verifyPlugin`.
+
+### ✓ Step 10: Add the ADSR envelope utility and rewire FirefliesEffect's reactions onto it
+`FirefliesEffect`'s speed and glow reactions ramp and decay through a shared, allocation-free `AdsrEnvelope` instead of ad-hoc blends, with no regression to the existing motion/dirty-region behaviour.
+
+- Implement `core/AdsrEnvelope.kt`: `Phase { IDLE, ATTACK, DECAY, SUSTAIN, RELEASE }`, `trigger(peak: Float)`, `release()`, `advance(deltaSeconds: Float): Float`; primitive fields only, retriggering mid-phase does not jump the current value.
+- Rewire `FirefliesEffect`: a `speedEnvelope` drives `speedMultiplier` (attack/decay to a sustained level while `ACTIVITY_STARTED`/`USER_IDLE` is active, `release()` on `ACTIVITY_FINISHED`/`USER_ACTIVE`, reusing today's `IDLE_SPEED`/`ACTIVITY_SPEED`/`NORMAL_SPEED` as envelope levels); a `glowEnvelope` drives `glow` as a one-shot attack-decay pulse on `SUCCESS` (reusing `GLOW_SECONDS` as the decay time). `FAILURE`'s `scatter()` impulse is unchanged.
+- Add `core/AdsrEnvelopeTest.kt` (phase transitions, retrigger during attack/decay, release before reaching sustain, `advance` with zero/negative duration, values stay within `[min(rest,peak), max(rest,peak)]`).
+- Update `FirefliesEffectTest` for the new envelope-driven speed/glow (same observable behaviour: speed converges toward targets, glow decays to 0); keep the dirty-region coverage test green.
+- Run `./gradlew test --tests 'info.chrzanowski.ideatmosphere.core.*' --tests 'info.chrzanowski.ideatmosphere.effects.*'`.
+
+### ✓ Step 11: Settings persistence and the Configurable UI, wired to AtmosphereManager and FirefliesEffect
+`Settings → Appearance & Behavior → Atmosphere` lets the user enable/disable, pick a theme, adjust intensity/speed, and opt out of activity reactions or pause-on-focus-loss, all persisted and applied live.
+
+- Implement `settings/AtmosphereSettingsState.kt` (`@Service(APP)`, `PersistentStateComponent<State>`, `@State(name="AtmosphereSettings", storages=[Storage("ide-atmosphere.xml")])`) holding `effectId`, `intensity`, `speed`, `reactToActivity`, `pauseOnFocusLoss` with sensible defaults.
+- Implement `settings/AtmosphereSettingsConfigurable.kt` (Kotlin UI DSL `panel { }`): enable checkbox bound to `AtmosphereManager.isEnabled`, theme `comboBox(AtmosphereEffects.ids)`, intensity/speed sliders (0.3–2.0), the two behavior checkboxes; `isModified`/`apply`/`reset`.
+- Extend `core/AtmosphereEffect.kt` with `fun setIntensity(scale: Float) {}` / `fun setSpeedScale(scale: Float) {}` (default no-op); implement both in `FirefliesEffect` (intensity scales `baseAlpha`/particle count at the next resize, speed scales the envelope's rest/sustain levels).
+- Extend `AtmosphereManager.kt`: make `Registration.effect` mutable; add `setEffectId(id: String)` that recreates every `FrameAtmosphere` with a fresh effect of the requested id (stopping/detaching the old one first, no leaks); add `applySettings()` pushing `intensity`/`speed` to every registration and gating `updateIdleProducer()`/`setApplicationActive()` on `reactToActivity`/`pauseOnFocusLoss`; call it from the Configurable's `apply()` and once at startup.
+- Register in `plugin.xml`: `<applicationConfigurable>` under the Appearance & Behavior group, `<applicationService>`/state for `AtmosphereSettingsState`.
+- Add `settings/AtmosphereSettingsStateTest.kt` (defaults, persistence round-trip) and extend `AtmosphereManagerTest` (`setEffectId` swaps the live effect without leaking, `reactToActivity=false` stops the idle producer, `pauseOnFocusLoss=false` makes `setApplicationActive` a no-op).
+- Run `./gradlew test --tests 'info.chrzanowski.ideatmosphere.settings.*'` then `./gradlew build`.
+
+### ✓ Step 12: Implement SakuraEffect and register it as a second selectable theme
+Selecting "Sakura" in the settings theme picker replaces the fireflies with drifting, rotating petals, proving the effect-agnostic architecture end to end.
+
+- Implement `effects/sakura/SakuraEffect.kt`: structure-of-arrays (`x,y,vx,vy,rotation,angularVelocity,size,alpha,phase,life,maxLife` + `prev*`) mirroring `FirefliesEffect`'s invariants; fall + sinusoidal horizontal sway; a reused `Path2D.Float` petal shape recomputed each paint from manual trig (no `AffineTransform`/`Ellipse2D` allocation) filled from a theme-aware cached color table; respawns above the top edge when a petal falls past the bottom.
+- Reactions: `speedEnvelope`-driven breeze strength on `ACTIVITY_STARTED`/`FINISHED` and `USER_IDLE`/`ACTIVE` (same `AdsrEnvelope` class as Fireflies), `glowEnvelope`-driven brightness pulse on `SUCCESS`, bounded horizontal gust impulse on `FAILURE`.
+- Register `SakuraEffect.ID` in `effects/AtmosphereEffects.kt`.
+- Add `effects/sakura/SakuraEffectTest.kt` mirroring `FirefliesEffectTest`'s structure (count/bounds after simulated updates and after shrinking, `dt=0` emits nothing, sub-pixel position and sub-degree rotation produce different painted coverage in a `BufferedImage`, dirty regions cover every painted petal, event reactions change breeze/glow/gust as expected).
+- Run `./gradlew test --tests 'info.chrzanowski.ideatmosphere.effects.*'`; sandbox-check that switching the theme picker between Fireflies and Sakura tears down and starts cleanly (no leftover particles, no exceptions).
+
+### ✓ Step 13: Wire the Run/Debug event producer with per-project activity reference counting
+Starting or stopping a Run/Debug configuration publishes `ACTIVITY_STARTED`/`ACTIVITY_FINISHED` and `SUCCESS`/`FAILURE` without flickering when another activity overlaps.
+
+- Add the reference-counted activity aggregator to `AtmosphereManager.kt` (per-project counter; `beginActivity(project)`/`endActivity(project, success)`; `ACTIVITY_STARTED` fires on 0→1, `ACTIVITY_FINISHED` on 1→0; `SUCCESS`/`FAILURE` published unconditionally through the existing `publish`); reset the counter in `detach()`.
+- Implement `events/ExecutionActivityProducer.kt` (`ExecutionListener`): `processStarted` → `beginActivity`, `processTerminated(exitCode)` → `endActivity(success = exitCode == 0)`.
+- Register as a project listener in `plugin.xml` (`<projectListeners>`, topic `com.intellij.execution.ExecutionManager$EXECUTION_TOPIC` — verify the exact topic constant against the platform sources before wiring).
+- Add aggregator unit tests (overlap does not double-fire `ACTIVITY_FINISHED`; gated by `reactToActivity`) and an `ExecutionActivityProducerTest` driving the listener callbacks directly.
+- Sandbox: run a configuration and confirm a pulse in the `AtmosphereStats` log and, best-effort, visually.
+
+### ✓ Step 14: Wire the background-task (dumb mode) and build event producers
+Indexing and builds also pulse the atmosphere through the same aggregator, completing the three planned activity sources.
+
+- Implement `events/DumbModeActivityProducer.kt` (`DumbService.DumbModeListener`: `enteredDumbMode` → `beginActivity`, `exitDumbMode` → `endActivity(success = true)`) and `events/BuildActivityProducer.kt` (`ProjectTaskListener`: `started` → `beginActivity`, `finished(context, result)` → `endActivity(success = !result.hasErrors() && !result.isAborted)`).
+- Register both as project listeners in `plugin.xml`.
+- Add producer tests driving each listener's callbacks directly against a fake aggregator; note the dumb-mode-as-background-task-proxy limitation in `docs/overlay-investigation.md`.
+- Run `./gradlew build`.
+
+### ✓ Step 15: Active-CPU tuning with re-measured constants
+The dirty-region cost model and frame-rate governor are recalibrated from fresh, foreground, primary-display measurements, and the real resulting CPU numbers are recorded honestly.
+
+- Run the sandbox on the primary display, foregrounded, with `-Dide.atmosphere.debug=true`; re-measure the true fixed per-paint cost and typical `nested`/`direct` rect counts.
+- Recalibrate `DirtyRegionCollector`'s `DEFAULT_FIXED_COST_NANOS`/grid/`maxRects` (and `FirefliesEffect.AREA_PER_PARTICLE`/`SakuraEffect`'s equivalent only if still necessary) from the fresh numbers; update the corresponding tests for the new constants.
+- Record the honest before/after CPU numbers in `docs/overlay-investigation.md` §11; do not overstate whether the ≤3% aspiration is met.
+- Run `./gradlew test` then `./gradlew build`.
+
+### Step 16: Final integration, sandbox verification and docs
+The sandbox demonstrates the settings panel, both themes, and all three activity producers working together with no exceptions, and the docs describe the finished milestone.
+
+- Run `./gradlew runIde` with the debug flag: exercise the settings panel (theme switch, sliders, checkboxes), trigger a run configuration, an indexing pass and a build, and confirm `AtmosphereStats`/visual pulses with no exceptions.
+- Update `README.md` (settings location, Sakura theme, new event sources, ADSR reaction shape, updated CPU numbers), `CHANGELOG.md` (Added/Changed), and `docs/overlay-investigation.md` final summary.
 - Run `./gradlew build verifyPlugin`.

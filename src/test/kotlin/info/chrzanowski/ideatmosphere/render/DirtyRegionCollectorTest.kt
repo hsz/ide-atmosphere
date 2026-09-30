@@ -39,7 +39,11 @@ class DirtyRegionCollectorTest {
         assertTrue(collector.mergeAll(Rectangle(0, 0, 100, 100)).isEmpty())
     }
 
-    /** Cost of one repaint rectangle according to the collector's default model. */
+    /**
+     * Measured fixed overhead of one rectangle painted inside the nested single-flush batch, ≈500 µs
+     * (re-measured in Step 15 to account for real-world underlying IDE component repaints;
+     * an isolated probe suggested ≈120 µs).
+     */
     private fun cost(r: Rectangle): Long =
         DirtyRegionCollector.DEFAULT_FIXED_COST_NANOS +
             r.width.toLong() * r.height * DirtyRegionCollector.DEFAULT_PER_PIXEL_COST_NANOS
@@ -79,7 +83,7 @@ class DirtyRegionCollectorTest {
 
         val clusters = cheapClusters(inputs)
         assertTrue("expected between $clusters and 24 rects but got ${rects.size}", rects.size in clusters..24)
-        assertTrue("per-particle rects must not be forced into a few big ones", rects.size > 6)
+        assertTrue("per-particle rects must not be forced into a few big ones", rects.size > 3)
         for (input in inputs) {
             assertTrue("input $input not covered", rects.any { it.contains(input) })
         }
@@ -135,7 +139,7 @@ class DirtyRegionCollectorTest {
     fun `cost model keeps six separate rects when every union would be expensive`() {
         val collector = DirtyRegionCollector(capacity = 32)
         val bounds = Rectangle(0, 0, 3000, 2000)
-        // 400×400 regions 1200 px apart: any union adds ≥ 640 k px (≈ 3.2 ms) which never pays for one saved 120 µs paint.
+        // 400×400 regions 1200 px apart: any union adds ≥ 640 k px (≈ 3.2 ms) which never pays for one saved 500 µs paint.
         for (row in 0 until 2) for (col in 0 until 3) {
             collector.add(100f + col * 1200f, 100f + row * 1000f, 400f, 400f)
         }
@@ -150,7 +154,7 @@ class DirtyRegionCollectorTest {
     fun `cost model merges tiny far-apart regions when the saved flush outweighs the added area`() {
         val collector = DirtyRegionCollector(capacity = 32)
         val bounds = Rectangle(0, 0, 3000, 2000)
-        // Two 8×8 dots on one row: the union strip is 1208×8 ≈ 9.7 k px (≈ 48 µs) < one 120 µs paint.
+        // Two 8×8 dots on one row: the union strip is 1208×8 ≈ 9.7 k px (≈ 48 µs) < one 500 µs paint.
         collector.add(100f, 100f, 8f, 8f)
         collector.add(1300f, 100f, 8f, 8f)
         assertEquals(listOf(Rectangle(100, 100, 1208, 8)), collector.mergeAll(bounds))

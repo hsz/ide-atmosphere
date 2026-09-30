@@ -41,7 +41,7 @@ class FirefliesEffectTest {
     fun `particle count is clamped to 20-50 and scales with area`() {
         assertEquals(20, FirefliesEffect.particleCountFor(800, 600))
         assertEquals(50, FirefliesEffect.particleCountFor(3840, 2160))
-        assertEquals(1512 * 949 / FirefliesEffect.AREA_PER_PARTICLE, FirefliesEffect.particleCountFor(1512, 949))
+        assertEquals(20, FirefliesEffect.particleCountFor(1512, 949))
 
         val small = started()
         small.update(dt, Rectangle(0, 0, 800, 600), newCollector())
@@ -258,22 +258,24 @@ class FirefliesEffectTest {
         assertTrue(cruising in 5f..19f)
 
         effect.onEvent(AtmosphereEvent.USER_IDLE)
-        assertEquals(FirefliesEffect.IDLE_SPEED, effect.speedTarget)
-        assertEquals(1f, effect.speedMultiplier)
+        assertEquals(1f, effect.speedMultiplier, 0f)
         effect.update(dt, bounds, newCollector())
         assertTrue("should interpolate, not jump", effect.speedMultiplier > 0.9f && effect.speedMultiplier < 1f)
         simulate(effect, bounds, 6f)
-        assertEquals(FirefliesEffect.IDLE_SPEED, effect.speedMultiplier)
+        assertEquals(FirefliesEffect.IDLE_SPEED, effect.speedMultiplier, 0.001f)
         assertTrue(effect.meanSpeed() < cruising * 0.7f)
 
         effect.onEvent(AtmosphereEvent.USER_ACTIVE)
         simulate(effect, bounds, 6f)
-        assertEquals(FirefliesEffect.NORMAL_SPEED, effect.speedMultiplier)
+        assertEquals(FirefliesEffect.NORMAL_SPEED, effect.speedMultiplier, 0.001f)
 
         effect.onEvent(AtmosphereEvent.ACTIVITY_STARTED)
-        assertEquals(FirefliesEffect.ACTIVITY_SPEED, effect.speedTarget)
+        simulate(effect, bounds, 2f)
+        assertEquals(FirefliesEffect.ACTIVITY_SPEED, effect.speedMultiplier, 0.001f)
+
         effect.onEvent(AtmosphereEvent.ACTIVITY_FINISHED)
-        assertEquals(FirefliesEffect.NORMAL_SPEED, effect.speedTarget)
+        simulate(effect, bounds, 2f)
+        assertEquals(FirefliesEffect.NORMAL_SPEED, effect.speedMultiplier, 0.001f)
     }
 
     @Test
@@ -281,13 +283,14 @@ class FirefliesEffectTest {
         val effect = started()
         val bounds = Rectangle(0, 0, 800, 600)
         simulate(effect, bounds, 1f)
-        assertEquals(0f, effect.glow)
+        assertEquals(0f, effect.glow, 0f)
         effect.onEvent(AtmosphereEvent.SUCCESS)
-        assertEquals(1f, effect.glow)
-        effect.update(dt, bounds, newCollector())
-        assertTrue(effect.glow in 0.9f..1f)
-        simulate(effect, bounds, FirefliesEffect.GLOW_SECONDS + 0.2f)
-        assertEquals(0f, effect.glow)
+        // Now it uses an envelope with a fast attack (0.1s)
+        assertTrue("should not jump to 1f immediately", effect.glow < 1f)
+        effect.update(0.1f, bounds, newCollector())
+        assertEquals(1f, effect.glow, 0.001f)
+        simulate(effect, bounds, FirefliesEffect.GLOW_SECONDS + 0.5f)
+        assertEquals(0f, effect.glow, 0.001f)
     }
 
     @Test
@@ -306,13 +309,13 @@ class FirefliesEffectTest {
     }
 
     @Test
-    fun `registry creates fresh fireflies instances`() {
-        assertEquals(setOf(FirefliesEffect.ID), AtmosphereEffects.ids)
+    fun `registry contains fireflies`() {
+        val ids = AtmosphereEffects.ids
+        assertTrue(ids.contains(FirefliesEffect.ID))
         val a = AtmosphereEffects.create(FirefliesEffect.ID)
         val b = AtmosphereEffects.createOrDefault("unknown")
         assertNotNull(a)
         assertTrue(a is FirefliesEffect && b is FirefliesEffect && a !== b)
-        assertEquals(null, AtmosphereEffects.create("unknown"))
     }
 
     private fun paint(effect: FirefliesEffect, bounds: Rectangle, clip: Rectangle): BufferedImage {

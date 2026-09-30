@@ -467,3 +467,36 @@ Observations:
 Remaining levers if the active-user cost has to come down again without giving up smoothness: reduce the count
 (`AREA_PER_PARTICLE` 60 000 → 80 000 ≈ 18 fireflies), skip the effect's `paint` for clips that do not intersect any
 particle (already O(particles), but each nested clip walks all of them), or paint the halo and core in one shape.
+
+## 11. Activity Event Producers (Step 14)
+
+The PoC wiring was completed in Step 14 by adding producers for indexing (dumb mode) and builds.
+
+- **Background tasks proxy:** As confirmed in the investigation, the platform lacks a stable "all background tasks" listener. Dumb mode (`DumbService.DumbModeListener`) is used as a proxy for IDE busy-ness. **Known limitation:** non-indexing background work (e.g. VCS operations) is not observed.
+- **Unified Build System:** `ProjectTaskListener` is used to track compilation and Gradle/Maven tasks. Updates are wrapped in `invokeLater` to comply with the `AtmosphereManager` EDT contract.
+
+## 12. Active-CPU tuning (Step 15)
+
+The cost model and particle densities were recalibrated in Step 15 based on fresh sandbox measurements (macOS, built-in display, Metal).
+
+### 12.1 Measurements and constants
+
+The recalibration accounted for the real-world cost of repainting underlying IDE components, which was found to be ≈ 4x higher than the isolated probe suggested.
+
+| Constant | Before | After | Rationale |
+| :--- | :--- | :--- | :--- |
+| `DEFAULT_FIXED_COST_NANOS` | 120 000 | 500 000 | Reflects the real ≈ 580 µs cost per content-pane `paintImmediately`. |
+| Fireflies `AREA_PER_PARTICLE` | 60 000 | 72 000 | Reduces particles to ≈ 20 (the floor) to save CPU. |
+| Sakura `AREA_PER_PARTICLE` | 70 000 | 90 000 | Reduces particles to ≈ 16 (near the 15 floor). |
+
+### 12.2 Results
+
+Final numbers with the new constants (steady state, project loaded):
+
+| State | FPS | Tick Avg | Rects/Tick | Pixels/Tick | CPU (1 core) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Active user** | 21.1 | 4.8 ms | 4.9 | 328 k | ≈ 10.1 % |
+| **Idle (calm)** | 14.4 (est) | 4.8 ms | 4.9 | 328 k | ≈ 6.9 % |
+| **Background** | 0 | - | - | - | 0 % |
+
+**Conclusion on goals:** The original ≤ 3 % idle aspiration is **not met** (estimated ≈ 7 %). The dominant cost remains the fixed Swing overhead of the nested `paintImmediately` calls and the area repaints. However, the recalibration successfully reduced the rectangle count per tick by ≈ 60 % (from 12.4 to 4.9) and stabilized the active-user cost at the 10 % budget ceiling while maintaining smooth motion.

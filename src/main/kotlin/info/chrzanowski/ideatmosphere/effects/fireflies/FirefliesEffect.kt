@@ -1,5 +1,6 @@
 package info.chrzanowski.ideatmosphere.effects.fireflies
 
+import info.chrzanowski.ideatmosphere.core.AdsrEnvelope
 import info.chrzanowski.ideatmosphere.core.AtmosphereEffect
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
 import info.chrzanowski.ideatmosphere.core.AtmospherePalette
@@ -47,6 +48,9 @@ class FirefliesEffect : AtmosphereEffect {
     private var uiScale = 1f
     private var palette: AtmospherePalette = AtmospherePalette.DARK
 
+    private var intensity: Float = 1f
+    private var speedScale: Float = 1f
+
     private val x = FloatArray(MAX_PARTICLES)
     private val y = FloatArray(MAX_PARTICLES)
     private val vx = FloatArray(MAX_PARTICLES)
@@ -80,17 +84,29 @@ class FirefliesEffect : AtmosphereEffect {
     var particleCount: Int = 0
         private set
 
-    /** Current smoothed speed multiplier (interpolates toward [speedTarget]). */
+    /** Current smoothed speed multiplier (driven by [AdsrEnvelope]). */
     var speedMultiplier: Float = 1f
         private set
 
-    /** Speed multiplier the simulation is converging to (driven by [onEvent]). */
-    var speedTarget: Float = 1f
-        private set
-
-    /** Extra brightness 0..1 added after [AtmosphereEvent.SUCCESS]; decays over [GLOW_SECONDS]. */
+    /** Extra brightness 0..1 added after [AtmosphereEvent.SUCCESS] (driven by [AdsrEnvelope]). */
     var glow: Float = 0f
         private set
+
+    private val speedEnvelope = AdsrEnvelope(
+        restLevel = NORMAL_SPEED,
+        attackSeconds = 0.3f,
+        decaySeconds = 0.4f,
+        sustainRatio = 1.0f,
+        releaseSeconds = 0.7f
+    )
+
+    private val glowEnvelope = AdsrEnvelope(
+        restLevel = 0f,
+        attackSeconds = 0.1f,
+        decaySeconds = GLOW_SECONDS,
+        sustainRatio = 0f,
+        releaseSeconds = 0f
+    )
 
     private var started = false
     private var lastWidth = -1
@@ -105,8 +121,12 @@ class FirefliesEffect : AtmosphereEffect {
         lastWidth = -1
         lastHeight = -1
         speedMultiplier = 1f
-        speedTarget = 1f
         glow = 0f
+        // Reset envelopes to idle at rest level
+        speedEnvelope.release()
+        speedEnvelope.advance(100f)
+        glowEnvelope.release()
+        glowEnvelope.advance(100f)
         started = true
     }
 
@@ -122,13 +142,22 @@ class FirefliesEffect : AtmosphereEffect {
         rebuildColorTables()
     }
 
+    override fun setIntensity(scale: Float) {
+        intensity = scale
+    }
+
+    override fun setSpeedScale(scale: Float) {
+        speedScale = scale
+        speedEnvelope.restLevel = NORMAL_SPEED * speedScale
+    }
+
     override fun onEvent(event: AtmosphereEvent) {
         when (event) {
-            AtmosphereEvent.USER_IDLE -> speedTarget = IDLE_SPEED
-            AtmosphereEvent.USER_ACTIVE -> speedTarget = NORMAL_SPEED
-            AtmosphereEvent.ACTIVITY_STARTED -> speedTarget = ACTIVITY_SPEED
-            AtmosphereEvent.ACTIVITY_FINISHED -> speedTarget = NORMAL_SPEED
-            AtmosphereEvent.SUCCESS -> glow = 1f
+            AtmosphereEvent.USER_IDLE -> speedEnvelope.trigger(IDLE_SPEED)
+            AtmosphereEvent.USER_ACTIVE -> speedEnvelope.release()
+            AtmosphereEvent.ACTIVITY_STARTED -> speedEnvelope.trigger(ACTIVITY_SPEED)
+            AtmosphereEvent.ACTIVITY_FINISHED -> speedEnvelope.release()
+            AtmosphereEvent.SUCCESS -> glowEnvelope.trigger(1f)
             AtmosphereEvent.FAILURE -> scatter()
         }
     }
@@ -146,10 +175,8 @@ class FirefliesEffect : AtmosphereEffect {
         }
 
         // Smooth global modifiers.
-        val blend = min(1f, deltaSeconds * SPEED_BLEND_RATE)
-        speedMultiplier += (speedTarget - speedMultiplier) * blend
-        if (abs(speedTarget - speedMultiplier) < 0.001f) speedMultiplier = speedTarget
-        if (glow > 0f) glow = max(0f, glow - deltaSeconds / GLOW_SECONDS)
+        speedMultiplier = speedEnvelope.advance(deltaSeconds)
+        glow = glowEnvelope.advance(deltaSeconds)
         val glowBoost = 1f + glow * GLOW_ALPHA_BOOST
         val opacityScale = palette.opacityScale
 
@@ -271,7 +298,7 @@ class FirefliesEffect : AtmosphereEffect {
         val by = bounds.y.toFloat()
         val bw = bounds.width.toFloat()
         val bh = bounds.height.toFloat()
-        val target = particleCountFor(bounds.width, bounds.height)
+        val target = particleCountFor(bounds.width, bounds.height, intensity)
         val previous = particleCount
         lastWidth = bounds.width
         lastHeight = bounds.height
@@ -305,7 +332,7 @@ class FirefliesEffect : AtmosphereEffect {
         wanderRate[i] = 0.3f + random.nextFloat() * 0.5f
         bobPhase[i] = random.nextFloat() * TWO_PI
         size[i] = (MIN_SIZE + random.nextFloat() * (MAX_SIZE - MIN_SIZE)) * uiScale
-        baseAlpha[i] = MIN_BASE_ALPHA + random.nextFloat() * (MAX_BASE_ALPHA - MIN_BASE_ALPHA)
+        baseAlpha[i] = (MIN_BASE_ALPHA + random.nextFloat() * (MAX_BASE_ALPHA - MIN_BASE_ALPHA)) * intensity
         phase[i] = random.nextFloat() * TWO_PI
         pulseRate[i] = MIN_PULSE_RATE + random.nextFloat() * (MAX_PULSE_RATE - MIN_PULSE_RATE)
         life[i] = 0f
@@ -380,11 +407,11 @@ class FirefliesEffect : AtmosphereEffect {
         const val MAX_PARTICLES: Int = 50
 
         /**
-         * User-space pixels per firefly (≈ 24 on a 1512×949 frame). Raised from the initial 45 000 after the
-         * first sandbox measurements: repaint cost grows with the number of moving particles, and two dozen
-         * fireflies already read as "a field" at this opacity.
+         * User-space pixels per firefly (≈ 20 on a 1512×949 frame). Raised from 60 000 to 72 000 in Step 15
+         * to hit the CPU budget: at ≈ 500 µs per rectangle, fewer particles are needed to stay near the
+         * 3% idle target.
          */
-        const val AREA_PER_PARTICLE: Int = 60_000
+        const val AREA_PER_PARTICLE: Int = 72_000
 
         const val MIN_SPEED: Float = 6f
         const val MAX_SPEED: Float = 18f
@@ -425,17 +452,18 @@ class FirefliesEffect : AtmosphereEffect {
         private const val WANDER_TURN_RATE = 1.2f
         private const val BOB_RATE = 1.5f
         private const val BOB_AMPLITUDE = 3f
-        private const val SPEED_BLEND_RATE = 1.5f
         private const val IMPULSE_DAMPING = 1.2f
         private const val SCATTER_IMPULSE_MIN = 30f
         private const val SCATTER_IMPULSE_MAX = 60f
         @Suppress("UseJBColor")
         private val TRANSPARENT = Color(0, 0, 0, 0)
 
-        /** `clamp(area / AREA_PER_PARTICLE, 20, 50)`. */
+        /** `clamp(area / (AREA_PER_PARTICLE * (1/intensity)), 20, 50)`. */
         @JvmStatic
-        fun particleCountFor(width: Int, height: Int): Int =
-            (width.toLong() * height / AREA_PER_PARTICLE).toInt().coerceIn(MIN_PARTICLES, MAX_PARTICLES)
+        fun particleCountFor(width: Int, height: Int, intensity: Float = 1f): Int {
+            val areaPerParticle = AREA_PER_PARTICLE * (1f / intensity)
+            return (width.toLong() * height / areaPerParticle).toInt().coerceIn(MIN_PARTICLES, MAX_PARTICLES)
+        }
 
         private fun lifeEnvelope(life: Float, maxLife: Float): Float {
             val fadeIn = min(1f, life / FADE_IN_SECONDS)

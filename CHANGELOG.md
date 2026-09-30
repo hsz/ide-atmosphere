@@ -21,7 +21,8 @@
 
 ### Changed
 
-- `DirtyRegionCollector` merges regions by fine-grid bucketing followed by greedy, cost-model-driven agglomeration (fewer, tighter rectangles; a single bounding box whenever it is the cheapest option) instead of a fixed 3×2 cell-union. Recalibrated for the nested batch: per-rectangle fixed cost 300 µs → 120 µs, 12×8 grid, no forced rectangle cap (the cost model alone decides).
+- Recalibrated the dirty-region cost model and particle densities (Step 15) from fresh built-in display measurements. The per-rectangle fixed cost was raised from 120 µs to 500 µs to reflect real-world Swing repaint overhead, resulting in ≈ 60 % fewer rectangles per tick and a stable active-user CPU cost of ≈ 10 %. Particle density was lowered to stay near the minimum threshold (≈ 20 fireflies, ≈ 16 petals).
+- `DirtyRegionCollector` merges regions by fine-grid bucketing followed by greedy, cost-model-driven agglomeration (fewer, tighter rectangles; a single bounding box whenever it is the cheapest option) instead of a fixed 3×2 cell-union. Recalibrated for the nested batch: per-rectangle fixed cost 120 µs → 500 µs, 12×8 grid, no forced rectangle cap (the cost model alone decides).
 - `FirefliesEffect` `AREA_PER_PARTICLE` 45 000 → 60 000 (≈ 24 fireflies on a 1512×949 frame); slower alpha pulse.
 - Frame-rate policy: `FrameBudgetGovernor` budget 30 000 → 100 000 µs/s (≈ 10 % of one core) with a 20–30 FPS range starting at 30 (was 10–30 starting at 24); the idle (`calm`) cap is 15 FPS (was 6) because the effect halves its speed at the same time.
 - Application deactivation fades the atmosphere out and stops the ticker instead of throttling to 4 FPS; `AtmosphereStats` reports the effective mode as `normal` / `calm` / `fading`.

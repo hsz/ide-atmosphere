@@ -45,4 +45,19 @@ interface AtmosphereEffect {
 
     /** The theme changed; rebuild cached colors here, never inside [paint]. Default no-op. */
     fun onPaletteChanged(palette: AtmospherePalette) {}
+
+    /**
+     * Updates the intensity of the effect.
+     * @param scale Expected in roughly [0.3, 2.0], where 1.0 is the default.
+     * Effects should apply this scale (e.g. to particle count or opacity) without allocating
+     * and without waiting for the next event.
+     */
+    fun setIntensity(scale: Float) {}
+
+    /**
+     * Updates the animation speed scale.
+     * @param scale Expected in roughly [0.3, 2.0], where 1.0 is the default.
+     * Effects should multiply their baseline speed by this scale.
+     */
+    fun setSpeedScale(scale: Float) {}
 }

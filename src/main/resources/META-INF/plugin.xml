@@ -31,6 +31,12 @@
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
         <postStartupActivity implementation="info.chrzanowski.ideatmosphere.project.AtmosphereProjectActivity"/>
+
+        <applicationConfigurable
+                groupId="appearance"
+                instance="info.chrzanowski.ideatmosphere.settings.AtmosphereSettingsConfigurable"
+                id="info.chrzanowski.ideatmosphere.settings.AtmosphereSettingsConfigurable"
+                displayName="Atmosphere"/>
     </extensions>
 
     <applicationListeners>
@@ -41,6 +47,15 @@
         <listener class="info.chrzanowski.ideatmosphere.listeners.AtmosphereActivationListener"
                   topic="com.intellij.openapi.application.ApplicationActivationListener"/>
     </applicationListeners>
+
+    <projectListeners>
+        <listener class="info.chrzanowski.ideatmosphere.events.ExecutionActivityProducer"
+                  topic="com.intellij.execution.ExecutionListener"/>
+        <listener class="info.chrzanowski.ideatmosphere.events.DumbModeActivityProducer"
+                  topic="com.intellij.openapi.project.DumbService$DumbModeListener"/>
+        <listener class="info.chrzanowski.ideatmosphere.events.BuildActivityProducer"
+                  topic="com.intellij.task.ProjectTaskListener"/>
+    </projectListeners>
 
     <actions>
         <!-- View | Appearance | Atmosphere; text/description come from the resource bundle. -->

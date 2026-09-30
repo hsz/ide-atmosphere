@@ -31,13 +31,13 @@ class FrameAtmosphereTest : BasePlatformTestCase() {
      */
     private class FakeTarget : FrameAtmosphere.RepaintTarget {
         override var isPaintable: Boolean = true
-        var content: Rectangle? = Rectangle(0, 40, 800, 560)
+        var content: Rectangle? = Rectangle(0, 40, 6000, 4000)
         val contentPaints = ArrayList<Rectangle>()
         val rootRepaints = ArrayList<Rectangle>()
 
         var painter: AtmospherePainter? = null
-        var component: JComponent = JPanel().apply { setSize(800, 600) }
-        val image = BufferedImage(800, 600, BufferedImage.TYPE_INT_ARGB)
+        var component: JComponent = JPanel().apply { setSize(6000, 4000) }
+        val image = BufferedImage(6000, 4000, BufferedImage.TYPE_INT_ARGB)
         /** Depth of the painter observed while each content paint was issued (0 = direct, 1 = from the hook). */
         val depthsAtPaint = ArrayList<Int>()
         /** Invoked on every content paint before painting; lets a test detach mid-batch. */
@@ -75,7 +75,7 @@ class FrameAtmosphereTest : BasePlatformTestCase() {
         rootPane = JRootPane()
         glassPane = IdeGlassPaneImpl(rootPane)
         rootPane.glassPane = glassPane
-        rootPane.setSize(800, 600)
+        rootPane.setSize(6000, 4040)
         rootPane.doLayout()
         effect = RecordingEffect()
         parent = Disposer.newDisposable("FrameAtmosphereTest")
@@ -216,9 +216,9 @@ class FrameAtmosphereTest : BasePlatformTestCase() {
         assertEquals(1, effect.updateCount)
         assertEquals(0, atmosphere.lastRectCount)
 
-        effect.regions.add(floatArrayOf(790f, 590f, 50f, 50f))
+        effect.regions.add(floatArrayOf(5990f, 4030f, 50f, 50f))
         atmosphere.tick(0.04f)
-        assertEquals(listOf(Rectangle(790, 590, 10, 10)), target.contentPaints)
+        assertEquals(listOf(Rectangle(5990, 4030, 10, 10)), target.contentPaints)
     }
 
     fun `test not paintable target skips the tick`() {
@@ -232,15 +232,15 @@ class FrameAtmosphereTest : BasePlatformTestCase() {
     }
 
     /**
-     * Five 20×20 content regions offset on both axes so that every pairwise union exceeds ≈25 k px and the cost
-     * model keeps them as five separate rectangles (aligned regions would be merged into a cheap thin strip).
+     * Five 20×20 content regions offset on both axes so that every pairwise union exceeds ≈100 k px and the cost
+     * model keeps them as five separate rectangles.
      */
     private val fiveSpreadRegions = listOf(
-        Rectangle(100, 100, 20, 20),
-        Rectangle(260, 270, 20, 20),
-        Rectangle(420, 440, 20, 20),
-        Rectangle(600, 560, 20, 20),
-        Rectangle(720, 320, 20, 20),
+        Rectangle(1000, 1000, 20, 20),
+        Rectangle(2000, 2000, 20, 20),
+        Rectangle(3000, 3000, 20, 20),
+        Rectangle(4000, 4000, 20, 20),
+        Rectangle(5000, 1000, 20, 20),
     )
 
     private fun addFiveSpreadRegions() {
@@ -339,8 +339,8 @@ class FrameAtmosphereTest : BasePlatformTestCase() {
         assertEquals(1, effect.updateCount)
     }
 
-    private val fullContent = Rectangle(0, 40, 800, 560)
-    private val headerBand = Rectangle(0, 0, 800, 40)
+    private val fullContent = Rectangle(0, 40, 6000, 4000)
+    private val headerBand = Rectangle(0, 0, 6000, 40)
 
     fun `test fade-out paints the whole overlay per tick, then the frame is dormant and paints nothing`() {
         val target = FakeTarget()

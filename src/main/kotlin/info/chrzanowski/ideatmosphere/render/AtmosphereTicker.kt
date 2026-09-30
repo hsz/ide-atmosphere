@@ -47,6 +47,9 @@ class AtmosphereTicker(
 
     val frameCount: Int get() = frames.size
 
+    @org.jetbrains.annotations.TestOnly
+    fun targetsForTest(): List<FrameAtmosphere> = ArrayList(frames)
+
     /** Reduced rate cap while the user is idle; takes effect on the next tick. */
     var calm: Boolean = false
         set(value) {

@@ -3,11 +3,14 @@ package info.chrzanowski.ideatmosphere
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.mock.MockProject
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.impl.IdeGlassPaneImpl
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.util.ui.UIUtil
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
+import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
+import info.chrzanowski.ideatmosphere.settings.AtmosphereSettingsState
 import javax.swing.JRootPane
 
 class AtmosphereManagerTest : BasePlatformTestCase() {
@@ -15,7 +18,8 @@ class AtmosphereManagerTest : BasePlatformTestCase() {
     private class Frame(name: String) {
         val rootPane = JRootPane()
         val glassPane = IdeGlassPaneImpl(rootPane)
-        val effect = RecordingEffect(name)
+        // Use the default ID so applySettings doesn't swap the effect for a real FirefliesEffect
+        val effect = RecordingEffect(AtmosphereEffects.DEFAULT_ID)
         val parent: Disposable = Disposer.newDisposable("AtmosphereManagerTest.$name")
 
         init {
@@ -44,6 +48,7 @@ class AtmosphereManagerTest : BasePlatformTestCase() {
             Disposer.dispose(second.parent)
             manager.setApplicationActive(true)
             manager.isEnabled = true
+            AtmosphereSettingsState.getInstance().loadState(AtmosphereSettingsState.State())
             PropertiesComponent.getInstance().unsetValue(AtmosphereManager.ENABLED_KEY)
             UIUtil.dispatchAllInvocationEvents()
         } finally {
@@ -290,6 +295,69 @@ class AtmosphereManagerTest : BasePlatformTestCase() {
         assertFalse(manager.ticker.calm)
     }
 
+    fun `test activity reference counting avoids flickering`() {
+        attachFirst()
+
+        manager.beginActivity(project)
+        assertEquals(listOf(AtmosphereEvent.ACTIVITY_STARTED), first.effect.events)
+
+        manager.beginActivity(project)
+        // No second START event
+        assertEquals(listOf(AtmosphereEvent.ACTIVITY_STARTED), first.effect.events)
+
+        manager.endActivity(project, success = true)
+        // No FINISH yet, but SUCCESS is published
+        assertEquals(listOf(AtmosphereEvent.ACTIVITY_STARTED, AtmosphereEvent.SUCCESS), first.effect.events)
+
+        manager.endActivity(project, success = false)
+        // Last activity finished -> FINISH event, plus FAILURE
+        assertEquals(
+            listOf(AtmosphereEvent.ACTIVITY_STARTED, AtmosphereEvent.SUCCESS, AtmosphereEvent.ACTIVITY_FINISHED, AtmosphereEvent.FAILURE),
+            first.effect.events
+        )
+    }
+
+    fun `test endActivity without beginActivity clamps and does not publish FINISHED but publishes outcome`() {
+        attachFirst()
+
+        manager.endActivity(project, success = true)
+        // Already 0, no 1->0 transition -> no FINISHED, but SUCCESS published
+        assertEquals(listOf(AtmosphereEvent.SUCCESS), first.effect.events)
+
+        // Ensure it didn't go negative: a new beginActivity should still be 0->1
+        manager.beginActivity(project)
+        assertEquals(listOf(AtmosphereEvent.SUCCESS, AtmosphereEvent.ACTIVITY_STARTED), first.effect.events)
+    }
+
+    fun `test reactToActivity setting suppresses all activity events`() {
+        attachFirst()
+        AtmosphereSettingsState.getInstance().state.reactToActivity = false
+
+        manager.beginActivity(project)
+        manager.endActivity(project, success = true)
+
+        assertEmpty(first.effect.events)
+
+        AtmosphereSettingsState.getInstance().state.reactToActivity = true
+        manager.beginActivity(project)
+        assertEquals(listOf(AtmosphereEvent.ACTIVITY_STARTED), first.effect.events)
+    }
+
+    fun `test detach clears activity count`() {
+        attachFirst()
+        manager.beginActivity(project)
+        assertEquals(listOf(AtmosphereEvent.ACTIVITY_STARTED), first.effect.events)
+
+        manager.detach(project)
+        // Clear effect recorded events by re-attaching with a fresh frame/parent to be safe
+        first = Frame("re-attached")
+        attachFirst()
+
+        // If count was preserved, this would be 1->2, so no START event
+        manager.beginActivity(project)
+        assertEquals(listOf(AtmosphereEvent.ACTIVITY_STARTED), first.effect.events)
+    }
+
     fun `test refresh palette reaches attached effects only`() {
         manager.refreshPalette()
         attachFirst()
@@ -299,5 +367,72 @@ class AtmosphereManagerTest : BasePlatformTestCase() {
         manager.isEnabled = false
         manager.refreshPalette()
         assertEquals(1, first.effect.palettes.size)
+    }
+
+    fun `test setEffectId swaps the live effect without leaking`() {
+        attachFirst()
+        val oldEffect = first.effect
+        val oldAtmosphere = manager.atmosphereFor(project)!!
+
+        manager.setEffectId("new-effect")
+
+        val newAtmosphere = manager.atmosphereFor(project)!!
+        assertNotSame(oldAtmosphere, newAtmosphere)
+        assertNotSame(oldEffect, newAtmosphere.effect)
+        assertEquals(1, oldEffect.stopCount)
+        assertTrue(newAtmosphere.isAttached)
+        assertTrue(first.glassPane.isVisible)
+
+        // Check that old atmosphere is removed from ticker
+        assertFalse(oldAtmosphere in manager.ticker.targetsForTest())
+        assertTrue(newAtmosphere in manager.ticker.targetsForTest())
+        assertEquals(1, manager.ticker.frameCount)
+    }
+
+    fun `test applySettings pushes intensity and speed`() {
+        attachFirst()
+        val state = AtmosphereSettingsState.getInstance().state
+        state.intensity = 0.5f
+        state.speed = 1.5f
+
+        manager.applySettings()
+
+        assertEquals(0.5f, first.effect.lastIntensity)
+        assertEquals(1.5f, first.effect.lastSpeedScale)
+    }
+
+    fun `test reactToActivity=false stops the idle producer`() {
+        attachFirst()
+        assertTrue(manager.isIdleProducerRunning)
+
+        val state = AtmosphereSettingsState.getInstance().state
+        state.reactToActivity = false
+        manager.applySettings()
+
+        assertFalse(manager.isIdleProducerRunning)
+
+        state.reactToActivity = true
+        manager.applySettings()
+        assertTrue(manager.isIdleProducerRunning)
+    }
+
+    fun `test pauseOnFocusLoss=false makes setApplicationActive a no-op`() {
+        attachFirst()
+        val atmosphere = manager.atmosphereFor(project)!!
+
+        val state = AtmosphereSettingsState.getInstance().state
+        state.pauseOnFocusLoss = false
+        manager.applySettings()
+
+        manager.setApplicationActive(false)
+        assertTrue(atmosphere.isVisible)
+        assertTrue(manager.ticker.isRunning)
+
+        state.pauseOnFocusLoss = true
+        manager.applySettings()
+        assertFalse(atmosphere.isVisible)
+        // snap to dormant on next tick
+        manager.ticker.tick()
+        assertTrue(atmosphere.isDormant)
     }
 }

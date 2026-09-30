@@ -21,10 +21,12 @@ import info.chrzanowski.ideatmosphere.effects.fireflies.FirefliesEffect
 import info.chrzanowski.ideatmosphere.events.IdleActivityProducer
 import info.chrzanowski.ideatmosphere.frame.FrameAtmosphere
 import info.chrzanowski.ideatmosphere.render.AtmosphereTicker
+import info.chrzanowski.ideatmosphere.settings.AtmosphereSettingsState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import java.util.EnumSet
+import java.util.HashMap
 import javax.swing.JRootPane
 import javax.swing.SwingUtilities
 
@@ -54,7 +56,7 @@ class AtmosphereManager(
 
     private class Registration(
         val rootPane: JRootPane,
-        val effect: AtmosphereEffect,
+        var effect: AtmosphereEffect,
         val parent: Disposable,
     ) {
         var atmosphere: FrameAtmosphere? = null
@@ -63,6 +65,7 @@ class AtmosphereManager(
     }
 
     private val registrations = LinkedHashMap<Project, Registration>()
+    private val activityCounts = HashMap<Project, Int>()
     private val pauseReasons: EnumSet<PauseReason> = EnumSet.noneOf(PauseReason::class.java)
     private var disposed = false
     private var idleJob: Job? = null
@@ -114,7 +117,8 @@ class AtmosphereManager(
             LOG.info("No root pane for ${project.name}; atmosphere not attached")
             return
         }
-        attach(project, rootPane, parent)
+        val state = AtmosphereSettingsState.getInstance().state
+        attach(project, rootPane, parent, AtmosphereEffects.createOrDefault(state.effectId))
     }
 
     /**
@@ -144,6 +148,7 @@ class AtmosphereManager(
     @RequiresEdt
     fun detach(project: Project) {
         val registration = registrations.remove(project) ?: return
+        activityCounts.remove(project)
         deactivate(registration)
         updateTicker()
         updateIdleProducer()
@@ -166,6 +171,50 @@ class AtmosphereManager(
             }
             for (registration in registrations.values) registration.atmosphere?.publish(event)
         }
+    }
+
+    /**
+     * Increments the activity counter for [project]. If this is the first activity (0→1), publishes
+     * [AtmosphereEvent.ACTIVITY_STARTED]. Generic and reference-counted so overlapping tasks
+     * (e.g. build + run) don't flicker the start/finish state. Respects `reactToActivity` setting.
+     */
+    @RequiresEdt
+    fun beginActivity(project: Project) {
+        if (disposed) return
+        val state = AtmosphereSettingsState.getInstance().state
+        if (!state.reactToActivity) return
+
+        val count = activityCounts.getOrDefault(project, 0) + 1
+        activityCounts[project] = count
+        if (count == 1) {
+            publish(AtmosphereEvent.ACTIVITY_STARTED, project)
+        }
+    }
+
+    /**
+     * Decrements the activity counter for [project]. If this reaches zero (1→0), publishes
+     * [AtmosphereEvent.ACTIVITY_FINISHED]. Always publishes [AtmosphereEvent.SUCCESS] or
+     * [AtmosphereEvent.FAILURE] regardless of counter transition. Respects `reactToActivity` setting.
+     */
+    @RequiresEdt
+    fun endActivity(project: Project, success: Boolean) {
+        if (disposed) return
+        val state = AtmosphereSettingsState.getInstance().state
+        if (!state.reactToActivity) return
+
+        val oldCount = activityCounts.getOrDefault(project, 0)
+        val newCount = (oldCount - 1).coerceAtLeast(0)
+        if (newCount == 0) {
+            activityCounts.remove(project)
+        } else {
+            activityCounts[project] = newCount
+        }
+
+        if (oldCount == 1 && newCount == 0) {
+            publish(AtmosphereEvent.ACTIVITY_FINISHED, project)
+        }
+
+        publish(if (success) AtmosphereEvent.SUCCESS else AtmosphereEvent.FAILURE, project)
     }
 
     /** Recomputes the palette from the current LaF and pushes it to every attached effect. */
@@ -194,8 +243,59 @@ class AtmosphereManager(
     fun setApplicationActive(active: Boolean) {
         if (disposed || isApplicationActive == active) return
         isApplicationActive = active
+
+        val state = AtmosphereSettingsState.getInstance().state
+        if (!state.pauseOnFocusLoss && !active) return
+
         for (registration in registrations.values) registration.atmosphere?.setVisible(active)
         updateTicker()
+    }
+
+    /**
+     * Applies the current settings to all registered frames and event producers.
+     */
+    @RequiresEdt
+    fun applySettings() {
+        if (disposed) return
+        val state = AtmosphereSettingsState.getInstance().state
+
+        // 1. Theme (effectId)
+        setEffectId(state.effectId)
+
+        // 2. Intensity & Speed
+        for (registration in registrations.values) {
+            val atmosphere = registration.atmosphere ?: continue
+            atmosphere.effect.setIntensity(state.intensity)
+            atmosphere.effect.setSpeedScale(state.speed)
+        }
+
+        // 3. React to activity
+        updateIdleProducer()
+
+        // 4. Pause on focus loss
+        if (!state.pauseOnFocusLoss) {
+            for (registration in registrations.values) registration.atmosphere?.setVisible(true)
+        } else {
+            for (registration in registrations.values) registration.atmosphere?.setVisible(isApplicationActive)
+        }
+        updateTicker()
+    }
+
+    /**
+     * Changes the active theme for all registered frames.
+     */
+    @RequiresEdt
+    fun setEffectId(id: String) {
+        if (disposed) return
+        AtmosphereSettingsState.getInstance().state.effectId = id
+
+        for (registration in registrations.values) {
+            if (registration.effect.id == id) continue
+
+            deactivate(registration)
+            registration.effect = AtmosphereEffects.createOrDefault(id)
+            if (isEnabled) activate(registration)
+        }
     }
 
     override fun dispose() {
@@ -209,6 +309,9 @@ class AtmosphereManager(
     private fun activate(registration: Registration) {
         if (registration.atmosphere != null || registration.parentDisposed) return
         val attachDisposable = Disposer.newDisposable(registration.parent, "IDE Atmosphere frame")
+        val state = AtmosphereSettingsState.getInstance().state
+        registration.effect.setIntensity(state.intensity)
+        registration.effect.setSpeedScale(state.speed)
         val atmosphere = FrameAtmosphere(
             rootPane = registration.rootPane,
             effect = registration.effect,
@@ -217,7 +320,7 @@ class AtmosphereManager(
         )
         atmosphere.paused = isPaused
         // Before attach the opacity snaps: a frame that appears while the IDE is in the background starts dormant.
-        atmosphere.setVisible(isApplicationActive)
+        atmosphere.setVisible(isApplicationActive || !state.pauseOnFocusLoss)
         atmosphere.attach(attachDisposable)
         registration.atmosphere = atmosphere
         registration.attachDisposable = attachDisposable
@@ -246,7 +349,8 @@ class AtmosphereManager(
     }
 
     private fun updateIdleProducer() {
-        val shouldRun = !disposed && isEnabled && registrations.isNotEmpty()
+        val state = AtmosphereSettingsState.getInstance().state
+        val shouldRun = !disposed && isEnabled && registrations.isNotEmpty() && state.reactToActivity
         if (shouldRun) {
             if (idleJob?.isActive != true) {
                 idleJob = IdleActivityProducer.forIde(::publish).start(coroutineScope, Dispatchers.UI)

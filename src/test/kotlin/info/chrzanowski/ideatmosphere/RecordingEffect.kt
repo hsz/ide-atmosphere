@@ -24,6 +24,8 @@ open class RecordingEffect(override val id: String = "recording") : AtmosphereEf
     val events = ArrayList<AtmosphereEvent>()
     val palettes = ArrayList<AtmospherePalette>()
     var context: EffectContext? = null
+    var lastIntensity = 1f
+    var lastSpeedScale = 1f
 
     /** Regions (x, y, w, h) reported on each update; empty list → update returns `false`. */
     val regions = ArrayList<FloatArray>()
@@ -57,5 +59,13 @@ open class RecordingEffect(override val id: String = "recording") : AtmosphereEf
 
     override fun onPaletteChanged(palette: AtmospherePalette) {
         palettes.add(palette)
+    }
+
+    override fun setIntensity(scale: Float) {
+        lastIntensity = scale
+    }
+
+    override fun setSpeedScale(scale: Float) {
+        lastSpeedScale = scale
     }
 }

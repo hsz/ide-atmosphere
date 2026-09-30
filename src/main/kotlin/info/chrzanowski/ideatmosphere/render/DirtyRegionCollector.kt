@@ -216,10 +216,11 @@ class DirtyRegionCollector(
 
     companion object {
         /**
-         * Measured fixed overhead of one rectangle painted inside the nested single-flush batch, ≈120 µs
-         * (a stand-alone `paintImmediately` with its own buffer flush costs ≈300 µs).
+         * Measured fixed overhead of one rectangle painted inside the nested single-flush batch, ≈500 µs
+         * (re-measured in Step 15 to account for real-world underlying IDE component repaints;
+         * an isolated probe suggested ≈120 µs).
          */
-        const val DEFAULT_FIXED_COST_NANOS: Long = 120_000L
+        const val DEFAULT_FIXED_COST_NANOS: Long = 500_000L
 
         /** Measured incremental cost per repainted user-space pixel, ≈5 ns. */
         const val DEFAULT_PER_PIXEL_COST_NANOS: Long = 5L
