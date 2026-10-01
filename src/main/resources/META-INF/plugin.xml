@@ -1,7 +1,7 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
     <!-- Unique identifier of the plugin. It should be FQN. It cannot be changed between the plugin versions. -->
-    <id>info.chrzanowski.ide-atmosphere.ide-atmosphere</id>
+    <id>info.chrzanowski.ideatmosphere</id>
 
     <!-- Public plugin name should be written in Title Case.
      Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-name -->
@@ -31,8 +31,8 @@
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html -->
     <depends>com.intellij.modules.platform</depends>
     <!-- Commit and push reactions load only where version control (and Git) are present. -->
-    <depends optional="true" config-file="ide-atmosphere-vcs.xml">com.intellij.modules.vcs</depends>
-    <depends optional="true" config-file="ide-atmosphere-git.xml">Git4Idea</depends>
+    <depends optional="true" config-file="ideatmosphere-vcs.xml">com.intellij.modules.vcs</depends>
+    <depends optional="true" config-file="ideatmosphere-git.xml">Git4Idea</depends>
 
     <resource-bundle>messages.AtmosphereBundle</resource-bundle>
 

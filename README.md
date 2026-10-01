@@ -77,7 +77,7 @@ other one, **Pause for 1 Hour** (resumable at any time; the snooze is not persis
 
 Reaction timings are built into each atmosphere and tuned to feel natural; there is nothing to configure there.
 Changes stay drafts until Apply, Reset reloads the saved values and Cancel discards them. Everything is persisted in
-`ide-atmosphere.xml`; the 1.x `avoidMouse` flag is migrated to the pointer mode (`false` → *Ignore the pointer*).
+`ideatmosphere.xml`; the 1.x `avoidMouse` flag is migrated to the pointer mode (`false` → *Ignore the pointer*).
 
 ### Debug statistics
 
@@ -120,8 +120,8 @@ Status bar widget ──switch/snooze──▶   │
 Adding another atmosphere means implementing `AtmosphereEffect` and registering it in `AtmosphereEffects`; adding an
 IDE integration means publishing `AtmosphereEvent`s through `AtmosphereManager.publish` (or `publishOutcome` for a
 plain success / failure). Neither touches the painter, the ticker or the lifecycle code. The commit and push producers
-live behind optional `com.intellij.modules.vcs` / `Git4Idea` descriptors (`META-INF/ide-atmosphere-vcs.xml`,
-`META-INF/ide-atmosphere-git.xml`), so IDEs without them still load the plugin.
+live behind optional `com.intellij.modules.vcs` / `Git4Idea` descriptors (`META-INF/ideatmosphere-vcs.xml`,
+`META-INF/ideatmosphere-git.xml`), so IDEs without them still load the plugin.
 
 ## Limitations (proof of concept)
 
@@ -157,7 +157,7 @@ live behind optional `com.intellij.modules.vcs` / `Git4Idea` descriptors (`META-
 │   ├── core/ · render/ · frame/ · effects/ · project/ · listeners/ · events/ · actions/ · widget/
 │   ├── AtmosphereBundle.kt · AtmosphereManager.kt
 ├── src/main/resources/META-INF/plugin.xml   Plugin manifest (activity, listeners, action, status bar widget)
-├── src/main/resources/META-INF/ide-atmosphere-vcs.xml · ide-atmosphere-git.xml   Optional VCS / Git descriptors
+├── src/main/resources/META-INF/ideatmosphere-vcs.xml · ideatmosphere-git.xml   Optional VCS / Git descriptors
 ├── src/main/resources/messages/             Message bundle
 ├── src/test/kotlin/...                      Tests mirroring the main packages
 ├── build.gradle.kts · settings.gradle.kts

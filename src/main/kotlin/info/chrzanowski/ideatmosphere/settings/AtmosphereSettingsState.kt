@@ -9,7 +9,7 @@ import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
  * Persists the atmosphere settings across IDE restarts.
  */
 @Service(Service.Level.APP)
-@State(name = "AtmosphereSettings", storages = [Storage("ide-atmosphere.xml")])
+@State(name = "AtmosphereSettings", storages = [Storage("ideatmosphere.xml")])
 class AtmosphereSettingsState : PersistentStateComponent<AtmosphereSettingsState.State> {
 
     data class State(
