@@ -19,6 +19,7 @@ import info.chrzanowski.ideatmosphere.core.AtmospherePalette
 import info.chrzanowski.ideatmosphere.core.EffectContext
 import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
 import info.chrzanowski.ideatmosphere.effects.fireflies.FirefliesEffect
+import info.chrzanowski.ideatmosphere.events.BackgroundTaskActivityProducer
 import info.chrzanowski.ideatmosphere.events.CaretAnchorProducer
 import info.chrzanowski.ideatmosphere.events.IdleActivityProducer
 import info.chrzanowski.ideatmosphere.events.TypingRhythmProducer
@@ -82,11 +83,17 @@ class AtmosphereManager(
 
     private val registrations = LinkedHashMap<Project, Registration>()
     private val activityCounts = HashMap<Project, Int>()
+    /** Suspended executions (debug sessions) per project; the field holds still while any is paused. */
+    private val pausedExecutions = HashMap<Project, MutableSet<Any>>()
     private val pauseReasons: EnumSet<PauseReason> = EnumSet.noneOf(PauseReason::class.java)
     private var disposed = false
     private var idleJob: Job? = null
     private var snoozeJob: Job? = null
     private var typingJob: Job? = null
+    private var backgroundJob: Job? = null
+
+    /** Status-bar background tasks → reference-counted, neutral activity; sampled while [isBackgroundProducerRunning]. */
+    private val backgroundProducer = BackgroundTaskActivityProducer(onBegin = ::beginActivity, onEnd = { endActivity(it) })
     private var typingAttached = false
     private val changeListeners = ArrayList<() -> Unit>()
 
@@ -132,6 +139,7 @@ class AtmosphereManager(
             updateTicker()
             updateIdleProducer()
             updateTypingProducer()
+            updateBackgroundProducer()
         }
 
     val isPaused: Boolean get() = pauseReasons.isNotEmpty()
@@ -170,6 +178,12 @@ class AtmosphereManager(
 
     /** `true` while the idle/active producer is collecting `IdleTracker` events. */
     val isIdleProducerRunning: Boolean get() = idleJob?.isActive == true
+
+    /** `true` while background tasks in the status bar are sampled. */
+    val isBackgroundProducerRunning: Boolean get() = backgroundJob?.isActive == true
+
+    /** `true` while some execution (debug session) of [project] is suspended. */
+    fun isExecutionPaused(project: Project): Boolean = pausedExecutions[project]?.isNotEmpty() == true
 
     /** `true` while keystrokes are observed for the typing flow. */
     val isTypingProducerRunning: Boolean get() = typingAttached
@@ -220,6 +234,7 @@ class AtmosphereManager(
         updateTicker()
         updateIdleProducer()
         updateTypingProducer()
+        updateBackgroundProducer()
     }
 
     /** Stops and forgets the atmosphere of [project]. Safe to call for unknown projects and more than once. */
@@ -227,10 +242,12 @@ class AtmosphereManager(
     fun detach(project: Project) {
         val registration = registrations.remove(project) ?: return
         activityCounts.remove(project)
+        pausedExecutions.remove(project)
         deactivate(registration)
         updateTicker()
         updateIdleProducer()
         updateTypingProducer()
+        updateBackgroundProducer()
     }
 
     /**
@@ -265,9 +282,37 @@ class AtmosphereManager(
 
         val count = activityCounts.getOrDefault(project, 0) + 1
         activityCounts[project] = count
-        if (count == 1) {
+        // While execution is suspended the field stays still; resuming re-publishes the busy state.
+        if (count == 1 && !isExecutionPaused(project)) {
             publish(AtmosphereEvent.ACTIVITY_STARTED, project)
         }
+    }
+
+    /**
+     * Marks the execution identified by [key] (a debug session) of [project] as suspended or running again. While at
+     * least one execution is suspended the field holds still ([AtmosphereEvent.EXECUTION_PAUSED]); when the last one
+     * resumes it returns to the busy speed if activities are still running, else to rest. Respects `reactToActivity`.
+     */
+    @RequiresEdt
+    fun setExecutionPaused(project: Project, key: Any, paused: Boolean) {
+        if (disposed || !registrations.containsKey(project)) return
+        val wasPaused = isExecutionPaused(project)
+        if (paused) {
+            pausedExecutions.getOrPut(project) { HashSet() }.add(key)
+        } else {
+            pausedExecutions[project]?.let { keys ->
+                keys.remove(key)
+                if (keys.isEmpty()) pausedExecutions.remove(project)
+            }
+        }
+        val nowPaused = isExecutionPaused(project)
+        if (wasPaused == nowPaused || !AtmosphereSettingsState.getInstance().state.reactToActivity) return
+        val event = when {
+            nowPaused -> AtmosphereEvent.EXECUTION_PAUSED
+            activityCounts.getOrDefault(project, 0) > 0 -> AtmosphereEvent.ACTIVITY_STARTED
+            else -> AtmosphereEvent.ACTIVITY_FINISHED
+        }
+        publish(event, project)
     }
 
     /**
@@ -320,7 +365,7 @@ class AtmosphereManager(
             activityCounts[project] = newCount
         }
 
-        if (oldCount == 1 && newCount == 0) {
+        if (oldCount == 1 && newCount == 0 && !isExecutionPaused(project)) {
             publish(AtmosphereEvent.ACTIVITY_FINISHED, project)
         }
 
@@ -415,8 +460,9 @@ class AtmosphereManager(
             atmosphere.pointerMode = state.pointerMode
         }
 
-        // 3. React to activity, typing and the caret
+        // 3. React to activity, background tasks, typing and the caret
         updateIdleProducer()
+        updateBackgroundProducer()
         updateTypingProducer()
         updateCaretProducers()
 
@@ -465,6 +511,7 @@ class AtmosphereManager(
         snoozeJob = null
         changeListeners.clear()
         stopIdleProducer()
+        stopBackgroundProducer()
         stopTypingProducer()
         for (registration in registrations.values) deactivate(registration)
         registrations.clear()
@@ -546,6 +593,29 @@ class AtmosphereManager(
         idleJob?.cancel()
         idleJob = null
         if (tickerDelegate.isInitialized()) ticker.calm = false
+    }
+
+    private fun updateBackgroundProducer() {
+        val state = AtmosphereSettingsState.getInstance().state
+        val shouldRun = !disposed && isEnabled && registrations.isNotEmpty() && state.reactToActivity
+        if (!shouldRun) {
+            stopBackgroundProducer()
+            return
+        }
+        if (backgroundJob?.isActive == true) return
+        backgroundJob = coroutineScope.launch(Dispatchers.UI) {
+            while (true) {
+                delay(BackgroundTaskActivityProducer.POLL_INTERVAL)
+                // A backgrounded IDE is dormant anyway; skip sampling until it is activated again.
+                if (isApplicationActive) backgroundProducer.sample(registrations.keys.toList())
+            }
+        }
+    }
+
+    private fun stopBackgroundProducer() {
+        backgroundJob?.cancel()
+        backgroundJob = null
+        if (!disposed) backgroundProducer.reset()
     }
 
     private fun updateTypingProducer() {

@@ -1,6 +1,9 @@
 package info.chrzanowski.ideatmosphere.effects
 
 import info.chrzanowski.ideatmosphere.core.AtmosphereEffect
+import info.chrzanowski.ideatmosphere.effects.autumn.AutumnLeavesEffect
+import info.chrzanowski.ideatmosphere.effects.bubbles.BubblesEffect
+import info.chrzanowski.ideatmosphere.effects.dust.DustEffect
 import info.chrzanowski.ideatmosphere.effects.fireflies.FirefliesEffect
 import info.chrzanowski.ideatmosphere.effects.rain.RainEffect
 import info.chrzanowski.ideatmosphere.effects.sakura.SakuraEffect
@@ -22,6 +25,9 @@ object AtmosphereEffects {
         SnowEffect.ID to { SnowEffect() },
         RainEffect.ID to { RainEffect() },
         StarfieldEffect.ID to { StarfieldEffect() },
+        AutumnLeavesEffect.ID to { AutumnLeavesEffect() },
+        BubblesEffect.ID to { BubblesEffect() },
+        DustEffect.ID to { DustEffect() },
     )
 
     /** Ids of all registered effects, in registration order. */

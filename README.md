@@ -1,21 +1,30 @@
 # IDE Atmosphere
 
-[![Twitter Follow](https://img.shields.io/badge/follow-%40JBPlatform-1DA1F2?logo=twitter)](https://twitter.com/JBPlatform)
-[![Developers Forum](https://img.shields.io/badge/JetBrains%20Platform-Join-blue)][jb:forum]
-
 ## Overview
 
 IDE Atmosphere is an IntelliJ Platform plugin that paints a quiet, living layer across the whole project frame (editor,
 tool windows, header and status bar): **Fireflies** on a summer night, **Sakura** petals in a spring breeze, softly
-falling **Snow**, fine **Rain** or a twinkling **Starfield**. It never intercepts input and never changes editor
-content, PSI or languages. The overlay is a `Painter` on the frame's existing `IdeGlassPaneImpl`; see
+falling **Snow**, fine **Rain**, a twinkling **Starfield**, swinging **Autumn Leaves**, rising **Bubbles** or
+**Dust Motes** floating in a beam of light. It never intercepts input and never changes editor content, PSI or
+languages. The overlay is a `Painter` on the frame's existing `IdeGlassPaneImpl`; see
 [docs/overlay-investigation.md](./docs/overlay-investigation.md) for the platform investigation behind that choice.
+
+| Fireflies | Sakura | Snow | Rain |
+|---|---|---|---|
+| ![Fireflies](docs/media/fireflies.gif) | ![Sakura](docs/media/sakura.gif) | ![Snow](docs/media/snow.gif) | ![Rain](docs/media/rain.gif) |
+| **Starfield** | **Autumn Leaves** | **Bubbles** | **Dust Motes** |
+| ![Starfield](docs/media/starfield.gif) | ![Autumn Leaves](docs/media/autumn.gif) | ![Bubbles](docs/media/bubbles.gif) | ![Dust Motes](docs/media/dust.gif) |
+
+Dark- and light-theme stills (`<id>-dark.png`, `<id>-light.png`) live next to the GIFs in [docs/media](./docs/media);
+the Development table below shows how to regenerate them.
 
 ## What it does
 
-- **Five atmospheres on every project window.** Wandering, breathing fireflies; drifting, tumbling Sakura petals;
+- **Eight atmospheres on every project window.** Wandering, breathing fireflies; drifting, tumbling Sakura petals;
   layered snowflakes with depth (near ones larger, brighter and faster); rain streaking down in depth layers and
-  splashing where the near drops land; or a slowly drifting, twinkling starfield with a rare shooting star. Each
+  splashing where the near drops land; a slowly drifting, twinkling starfield with a rare shooting star; warm autumn
+  leaves swinging down like a pendulum; thin bubbles wobbling upwards; or tiny dust motes hanging almost still and
+  shimmering in the light. Each
   covers the whole `IdeFrame` — editor, tool windows, empty editor area, toolbar/header band and status bar. The count
   scales with the window area and the field is rebuilt on resize.
 - **Never in the way.** The overlay is a `Painter` on the frame's existing `IdeGlassPaneImpl`: passive cursor
@@ -32,7 +41,9 @@ content, PSI or languages. The overlay is a `Painter` on the frame's existing `I
   it has moved on; in *Attract* mode they gather around the pointer and hover just outside a small stop radius; *Off*
   ignores it. A mouse click puffs nearby particles outward. Everything is observed through a passive
   `AWTEventListener`, so clicks and movement reach the IDE unchanged; this is independent of activity reactions.
-- **Reacts to the IDE — with motion, never with colour.** Indexing, project builds, Run/Debug processes and external
+- **Reacts to the IDE — with motion, never with colour.** When the debugger stops on a breakpoint (or after a step)
+  the field holds still almost completely, as if holding its breath, until the session resumes. Any background task
+  shown in the status bar for more than about a second, indexing, project builds, Run/Debug processes and external
   project sync/tasks (including Gradle) speed the particles up while they run. A success makes the whole field rise
   for a moment (fireflies lift and brighten, petals and snow ride an updraft, rain eases, a shooting star crosses the
   sky); a failure scatters the fireflies, sends one gust through the petals, flakes and drops or makes the sky shiver
@@ -63,7 +74,9 @@ other one, **Pause for 1 Hour** (resumable at any time; the snooze is not persis
 
 `Settings | Appearance & Behavior | Atmosphere` is deliberately small:
 
-- **Atmosphere** — Fireflies, Sakura, Snow, Rain or Starfield, with a one-line description of the selected one.
+- **Atmosphere** — Fireflies, Sakura, Snow, Rain, Starfield, Autumn Leaves, Bubbles or Dust Motes, with a one-line
+  description of the selected one and a **live preview** that runs it with the drafted intensity and speed before
+  Apply (it animates only while the page is shown and never touches the open windows).
 - **Intensity** (Subtle … Vivid) and **Speed** (Calm … Lively) sliders. Intensity changes opacity and population on
   the next animation tick without a resize; speed scales normal, idle and busy motion alike.
 - **React to IDE activity**, with **Preview success** / **Preview failure** buttons that play the reactions on the
@@ -114,20 +127,27 @@ Status bar widget ──switch/snooze──▶   │
 | `core` | `AtmosphereEffect`, `AtmosphereEvent`, `AtmospherePalette`, `PointerMode`, `EffectContext`, `AdsrEnvelope` (smooth reaction envelopes), `CursorAvoidance` (shared avoid / attract steering and click bursts) — effect-agnostic, Swing-only contracts |
 | `render` | `AtmospherePainter` (glass-pane painter with fade opacity and the one-shot nested-paint hook), `DirtyRegionCollector` (cost-model region merging), `FrameBudgetGovernor` (adaptive 20–30 FPS), `AtmosphereTicker` (shared Swing timer, calm mode, dormant notification), `AtmosphereStats` |
 | `frame` | `FrameAtmosphere` — one effect on one root pane, nested batch repaint routing, passive pointer / click observation, fade-out/fade-in and dormancy |
-| `effects` | `AtmosphereEffects` registry, `fireflies/FirefliesEffect`, `sakura/SakuraEffect`, `snow/SnowEffect`, `rain/RainEffect`, `starfield/StarfieldEffect` (structure-of-arrays, allocation-free hot path) |
-| `project`, `listeners`, `events`, `actions`, `widget` | Lifecycle wiring, platform listeners, idle, typing, build, execution, indexing, external-system, test-result, commit and push producers, `ToggleAtmosphereAction`, the status bar widget |
+| `effects` | `AtmosphereEffects` registry, `fireflies/FirefliesEffect`, `sakura/SakuraEffect`, `snow/SnowEffect`, `rain/RainEffect`, `starfield/StarfieldEffect`, and `autumn/AutumnLeavesEffect`, `bubbles/BubblesEffect`, `dust/DustEffect` on the shared `common/DriftingParticleEffect` base (structure-of-arrays, allocation-free hot path) |
+| `settings` | Persisted state, the settings page and its `AtmospherePreviewPanel` |
+| `project`, `listeners`, `events`, `actions`, `widget` | Lifecycle wiring, platform listeners, idle, typing, build, execution, debugger, background-task, indexing, external-system, test-result, commit and push producers, `ToggleAtmosphereAction`, the status bar widget |
 
-Adding another atmosphere means implementing `AtmosphereEffect` and registering it in `AtmosphereEffects`; adding an
+Adding another atmosphere means implementing `AtmosphereEffect` (or, for independent drifting particles, extending
+`DriftingParticleEffect` with spawn, drift and paint hooks) and registering it in `AtmosphereEffects`; adding an
 IDE integration means publishing `AtmosphereEvent`s through `AtmosphereManager.publish` (or `publishOutcome` for a
-plain success / failure). Neither touches the painter, the ticker or the lifecycle code. The commit and push producers
-live behind optional `com.intellij.modules.vcs` / `Git4Idea` descriptors (`META-INF/ideatmosphere-vcs.xml`,
-`META-INF/ideatmosphere-git.xml`), so IDEs without them still load the plugin.
+plain success / failure). Neither touches the painter, the ticker or the lifecycle code. The commit, push and debugger
+producers live behind optional `com.intellij.modules.vcs` / `Git4Idea` / `com.intellij.modules.xdebugger`
+descriptors (`META-INF/ideatmosphere-vcs.xml`, `META-INF/ideatmosphere-git.xml`,
+`META-INF/ideatmosphere-xdebugger.xml`), so IDEs without them still load the plugin. Background tasks are sampled
+from the project's status bar once a second (`BackgroundTaskActivityProducer`), because the platform's task-start
+listener is internal API; sampling stops with *React to IDE activity* off and skips ticks while the IDE is in the
+background.
 
 ## Limitations (proof of concept)
 
 - No atmosphere on floating tool windows, detached editor windows, the Welcome screen, dialogs or popups.
-- Activity integration does not observe arbitrary background actions or terminal commands. External-system
-  notifications cover Gradle sync/tasks; Maven-specific sync is not verified. Push reactions cover Git only.
+- Activity integration does not observe terminal commands, and background tasks that are not shown in the status bar
+  (or finish within about a second) are not noticed. External-system notifications cover Gradle sync/tasks;
+  Maven-specific sync is not verified. Push reactions cover Git only.
 - A test run whose process exit code agrees with its result tree reacts twice in quick succession (once from the
   runner, once from the process), which reads as a slightly longer reaction.
 - While the overlay is visible, ordinary IDE repaints pay a ≈ 5–10 % overhead (the same as IDE background images).
@@ -147,131 +167,29 @@ live behind optional `com.intellij.modules.vcs` / `Git4Idea` descriptors (`META-
 | `./gradlew runIde` | Sandbox IDE with the plugin and debug statistics enabled |
 | `./gradlew verifyPlugin` | Plugin Verifier against the configured IDE versions |
 | `./gradlew build` | Compile, test and package |
+| `./gradlew test --tests '*MarketplaceMediaGenerator' -Pide.atmosphere.media.dir=docs/media` | Re-render the screenshots and GIFs in `docs/media` (skipped in ordinary test runs) |
 
 ## Plugin structure
 
 ```
 .
 ├── docs/overlay-investigation.md   Platform investigation and measurements
+├── docs/media/                     Screenshots and GIFs for the README and Marketplace listing
 ├── src/main/kotlin/info/chrzanowski/ideatmosphere/
 │   ├── core/ · render/ · frame/ · effects/ · project/ · listeners/ · events/ · actions/ · widget/
 │   ├── AtmosphereBundle.kt · AtmosphereManager.kt
 ├── src/main/resources/META-INF/plugin.xml   Plugin manifest (activity, listeners, action, status bar widget)
-├── src/main/resources/META-INF/ideatmosphere-vcs.xml · ideatmosphere-git.xml   Optional VCS / Git descriptors
+├── src/main/resources/META-INF/ideatmosphere-vcs.xml · ideatmosphere-git.xml · ideatmosphere-xdebugger.xml   Optional VCS / Git / debugger descriptors
 ├── src/main/resources/messages/             Message bundle
 ├── src/test/kotlin/...                      Tests mirroring the main packages
 ├── build.gradle.kts · settings.gradle.kts
 └── CHANGELOG.md · README.md
 ```
 
-The plugin logo is placed in `src/main/resources/META-INF/pluginIcon.svg`.
-See [Plugin Logo][docs:logo] for more information and logo requirements.
+The plugin logo is `src/main/resources/META-INF/pluginIcon.svg`; Marketplace screenshots come from `docs/media`.
 
-## Build script
+## Links
 
-The [build.gradle.kts][file:build.gradle.kts] is the core of the project definition.
-It applies three Gradle plugins:
-
-| Plugin                            | Description                                                                      |
-|-----------------------------------|----------------------------------------------------------------------------------|
-| `org.jetbrains.kotlin.jvm`        | Adds Kotlin support                                                              |
-| `org.jetbrains.changelog`         | Simplifies patching the [CHANGELOG.md][file:CHANGELOG.md] file                   |
-| `org.jetbrains.intellij.platform` | The [IntelliJ Platform Gradle Plugin][docs:intellij-platform-gradle-plugin-docs] |
-
-The `intellijPlatform` dependencies block selects the IDE to compile against:
-
-```kotlin
-intellijIdea("2025.3.6.1")
-```
-
-See [Target Versions][docs:target-version] for more information.
-
-The `intellijPlatform` dependencies block also contains a dependency on the platform testing framework:
-
-```kotlin
-testFramework(TestFrameworkType.Platform)
-```
-
-See [Testing][docs:testing] for more information
-
-## Plugin configuration file
-
-The plugin configuration file is a [plugin.xml][file:plugin.xml] file located in the `src/main/resources/META-INF`
-directory.
-It provides general information about the plugin, its dependencies, extensions, and listeners.
-
-You can read more about this file in the [Plugin Configuration File][docs:plugin.xml] section of our documentation.
-
-### Plugin ID and name
-
-Generated plugin ID and name may require adjustment.
-
-These values are generated based on _Group ID_ and _Artifact ID_ provided in the IDE Plugin wizard.
-It is recommended to review `<id>` and `<name>` elements in the plugin.xml file, and adjust them if needed.
-
-Please note that Gradle properties `rootProject.name` and `project.group` don't need to match the `<id>` and `<name>`
-elements.
-There is no IntelliJ Platform-related reason they should as they serve different functions.
-
-## Predefined Run/Debug configurations
-
-Within the default project structure, there is a `.run` directory provided containing predefined *Run/Debug
-configurations* that expose corresponding Gradle tasks:
-
-| Configuration name  | Description                                                                                                                                                                           |
-|---------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Run IDE with Plugin | Runs [`:runIde`][docs:intellij-platform-gradle-plugin-runIde] IntelliJ Platform Gradle Plugin task. Use the *Debug* icon for plugin debugging.                                        |
-| Run Tests           | Runs [`:check`][gradle:lifecycle-tasks] Gradle task.                                                                                                                                  |
-| Run Verifications   | Runs [`:verifyPlugin`][docs:intellij-platform-gradle-plugin-verifyPlugin] IntelliJ Platform Gradle Plugin task to check the plugin compatibility against the specified IntelliJ IDEs. |
-
-> [!NOTE]
-> You can find the logs from the running task in the `idea.log` tab.
-
-## Publishing the plugin
-
-> [!TIP]
-> Make sure to follow all guidelines listed in [Publishing a Plugin][docs:publishing] to follow all recommended and
-required steps.
-
-Releasing a plugin to [JetBrains Marketplace](https://plugins.jetbrains.com) is a straightforward operation that uses
-the `publishPlugin` Gradle task provided by
-the [intellij-platform-gradle-plugin][docs:intellij-platform-gradle-plugin-docs].
-
-You can also upload the plugin to the [JetBrains Plugin Repository](https://plugins.jetbrains.com/plugin/upload)
-manually via UI.
-
-## Useful links
-
-- [IntelliJ Platform SDK Plugin SDK][docs]
-- [IntelliJ Platform Gradle Plugin Documentation][docs:intellij-platform-gradle-plugin-docs]
-- [IntelliJ Platform Explorer][jb:ipe]
-- [JetBrains Marketplace Quality Guidelines][jb:quality-guidelines]
-- [IntelliJ Platform UI Guidelines][jb:ui-guidelines]
-- [JetBrains Marketplace Paid Plugins][jb:paid-plugins]
-- [IntelliJ SDK Code Samples][gh:code-samples]
-
-[docs]: https://plugins.jetbrains.com/docs/intellij
-[docs:plugin.xml]: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html?from=IJPluginReadmeFile
-[docs:publishing]: https://plugins.jetbrains.com/docs/intellij/publishing-plugin.html?from=IJPluginReadmeFile
-[docs:intellij-platform-gradle-plugin-docs]: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin.html?from=IJPluginReadmeFile
-[docs:intellij-platform-gradle-plugin-runIde]: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-tasks.html?from=IJPluginReadmeFile#runIde
-[docs:intellij-platform-gradle-plugin-verifyPlugin]: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-tasks.html?from=IJPluginReadmeFile#verifyPlugin
-[docs:logo]: https://plugins.jetbrains.com/docs/intellij/plugin-icon-file.html?from=IJPluginReadmeFile
-[docs:target-version]: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-dependencies-extension.html?from=IJPluginReadmeFile#target-versions
-[docs:testing]: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-dependencies-extension.html?from=IJPluginReadmeFile#testing
-
-[file:build.gradle.kts]: ./build.gradle.kts
-[file:CHANGELOG.md]: ./CHANGELOG.md
-[file:gradle.properties]: ./gradle.properties
-[file:plugin.xml]: ./src/main/resources/META-INF/plugin.xml
-
-[gh:code-samples]: https://github.com/JetBrains/intellij-sdk-code-samples
-
-[gradle:lifecycle-tasks]: https://docs.gradle.org/current/userguide/java_plugin.html#lifecycle_tasks
-
-[jb:github]: https://github.com/JetBrains/.github/blob/main/profile/README.md
-[jb:forum]: https://platform.jetbrains.com/
-[jb:quality-guidelines]: https://plugins.jetbrains.com/docs/marketplace/quality-guidelines.html
-[jb:paid-plugins]: https://plugins.jetbrains.com/docs/marketplace/paid-plugins-marketplace.html
-[jb:ipe]: https://jb.gg/ipe
-[jb:ui-guidelines]: https://jetbrains.github.io/ui
+- [IntelliJ Platform Plugin SDK](https://plugins.jetbrains.com/docs/intellij)
+- [IntelliJ Platform Gradle Plugin](https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin.html)
+- [JetBrains Marketplace Quality Guidelines](https://plugins.jetbrains.com/docs/marketplace/quality-guidelines.html)

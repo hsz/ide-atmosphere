@@ -1,0 +1,8 @@
+<!-- Loaded only when the IDE has a debugger (com.intellij.modules.xdebugger). -->
+<idea-plugin>
+    <projectListeners>
+        <!-- Breakpoint hit / step finished: the field holds still until the session resumes. -->
+        <listener class="info.chrzanowski.ideatmosphere.events.DebuggerActivityProducer"
+                  topic="com.intellij.xdebugger.XDebuggerManagerListener"/>
+    </projectListeners>
+</idea-plugin>

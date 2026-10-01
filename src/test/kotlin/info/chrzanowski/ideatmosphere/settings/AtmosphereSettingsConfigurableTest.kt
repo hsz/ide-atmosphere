@@ -101,6 +101,25 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
         assertTrue(normalized(control<JEditorPane>("previewComment").text).contains(AtmosphereBundle.message("settings.preview.comment")))
     }
 
+    fun `test live preview follows the drafted atmosphere, intensity and speed before Apply`() {
+        val preview = checkNotNull(configurable.preview)
+        assertEquals(settings.state.effectId, preview.effectId)
+        val effect = nonDefaultEffect()
+        effectCombo().selectedItem = effect
+        slider("intensity").value = 150
+        assertEquals(effect, preview.effectId)
+        assertEquals(0, applyCalls)
+
+        // Showing starts the animation, hiding stops it and releases the effect.
+        preview.addNotify()
+        assertTrue(preview.isAnimating)
+        assertEquals(effect, preview.effect?.id)
+        preview.tick()
+        preview.removeNotify()
+        assertFalse(preview.isAnimating)
+        assertNull(preview.effect)
+    }
+
     fun `test controls edit a draft including enabled until Apply`() {
         val before = settings.state.deepCopy()
         val effect = nonDefaultEffect()

@@ -24,4 +24,10 @@ enum class AtmosphereEvent {
 
     /** The user has not interacted with the IDE for a while. */
     USER_IDLE,
+
+    /**
+     * Execution is suspended (the debugger stopped on a breakpoint or after a step): the field holds still almost
+     * completely. It ends with [ACTIVITY_STARTED] (still busy) or [ACTIVITY_FINISHED] (back to rest).
+     */
+    EXECUTION_PAUSED,
 }

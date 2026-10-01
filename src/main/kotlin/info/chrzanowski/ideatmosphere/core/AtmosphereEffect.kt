@@ -98,5 +98,11 @@ interface AtmosphereEffect {
     companion object {
         /** Fraction added to the speed at full typing flow (`setFlow(1f)` runs 1.5× the configured speed). */
         const val FLOW_SPEED_BOOST: Float = 0.5f
+
+        /**
+         * Share of an effect's idle speed it holds while execution is paused on a breakpoint
+         * ([AtmosphereEvent.EXECUTION_PAUSED]): the field almost freezes, as if holding its breath.
+         */
+        const val PAUSED_SPEED_FACTOR: Float = 0.5f
     }
 }

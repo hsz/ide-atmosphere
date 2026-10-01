@@ -235,6 +235,7 @@ class SnowEffect : AtmosphereEffect {
     override fun onEvent(event: AtmosphereEvent) {
         when (event) {
             AtmosphereEvent.USER_IDLE -> speedEnvelope.trigger(IDLE_SPEED)
+            AtmosphereEvent.EXECUTION_PAUSED -> speedEnvelope.trigger(IDLE_SPEED * AtmosphereEffect.PAUSED_SPEED_FACTOR)
             AtmosphereEvent.USER_ACTIVE -> speedEnvelope.release()
             AtmosphereEvent.ACTIVITY_STARTED -> speedEnvelope.trigger(ACTIVITY_SPEED)
             AtmosphereEvent.ACTIVITY_FINISHED -> speedEnvelope.release()

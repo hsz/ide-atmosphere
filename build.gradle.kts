@@ -31,4 +31,13 @@ tasks {
         // Periodic FPS / tick-cost / repaint statistics in the sandbox idea.log (see AtmosphereStats).
         jvmArgs("-Dide.atmosphere.debug=true")
     }
+
+    test {
+        // Marketplace / README media (MarketplaceMediaGenerator) render only when a target directory is given:
+        // ./gradlew test --tests '*MarketplaceMediaGenerator' -Pide.atmosphere.media.dir=docs/media
+        providers.gradleProperty("ide.atmosphere.media.dir").orNull?.let {
+            systemProperty("ide.atmosphere.media.dir", layout.projectDirectory.dir(it).asFile.absolutePath)
+            outputs.upToDateWhen { false }
+        }
+    }
 }

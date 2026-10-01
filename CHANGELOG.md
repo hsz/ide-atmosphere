@@ -6,6 +6,11 @@
 
 ### Added
 
+- Three atmospheres on a shared `DriftingParticleEffect` base (population, envelopes, outcomes, pointer, caret, typing and adaptive dirty reporting in one place): `AutumnLeavesEffect` (warm amber / rust leaves swinging down like a pendulum and slowly turning), `BubblesEffect` (thin bubbles with a glint wobbling upwards, larger ones faster) and `DustEffect` (tiny motes hanging almost still in lazy loops, shimmering in the light).
+- Debugger reaction: while a debug session is suspended on a breakpoint or after a step the field holds still (`AtmosphereEvent.EXECUTION_PAUSED`, half the idle speed) and returns to the busy or resting speed on resume; several sessions are tracked separately (`AtmosphereManager.setExecutionPaused`). Registered through the optional `com.intellij.modules.xdebugger` descriptor.
+- Background-task activity: `BackgroundTaskActivityProducer` samples the project's status-bar progress once a second and turns tasks running for about a second or longer into a neutral, reference-counted activity; sampling stops while *React to IDE activity* is off and skips ticks while the IDE is in the background.
+- Live preview on the settings page (`AtmospherePreviewPanel`): the selected atmosphere runs with the drafted intensity and speed before Apply, animating only while the page is shown.
+- Marketplace / README media: `MarketplaceMediaGenerator` renders dark and light stills and a looping GIF per atmosphere into `docs/media` (`-Pide.atmosphere.media.dir=docs/media`); the README shows a GIF gallery and drops the plugin-template sections.
 - `RainEffect`: fine rain streaking down in depth layers (nearer drops longer, brighter and faster), leaning with a gentle breeze and splashing where the near drops land; a success eases the rain, a failure brings a stormy gust with a brief brightness-only flash.
 - `StarfieldEffect`: a slowly drifting, twinkling night sky with a rare shooting star (cold white on dark themes, soft slate-blue on light ones); a success lifts the stars and launches a shooting star, a failure makes the sky shiver and dim.
 - **Reduce motion** setting: every atmosphere runs very slowly at a capped frame rate without success bursts, failure gusts, click puffs or typing boosts.

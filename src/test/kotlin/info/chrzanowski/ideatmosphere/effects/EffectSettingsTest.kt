@@ -5,6 +5,10 @@ import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
 import info.chrzanowski.ideatmosphere.core.AtmospherePalette
 import info.chrzanowski.ideatmosphere.core.EffectContext
 import info.chrzanowski.ideatmosphere.core.PointerMode
+import info.chrzanowski.ideatmosphere.effects.autumn.AutumnLeavesEffect
+import info.chrzanowski.ideatmosphere.effects.bubbles.BubblesEffect
+import info.chrzanowski.ideatmosphere.effects.common.DriftingParticleEffect
+import info.chrzanowski.ideatmosphere.effects.dust.DustEffect
 import info.chrzanowski.ideatmosphere.effects.fireflies.FirefliesEffect
 import info.chrzanowski.ideatmosphere.effects.rain.RainEffect
 import info.chrzanowski.ideatmosphere.effects.sakura.SakuraEffect
@@ -20,7 +24,10 @@ import java.awt.image.BufferedImage
 
 class EffectSettingsTest {
 
-    private val particleFactories = listOf({ FirefliesEffect() }, { SakuraEffect() }, { SnowEffect() })
+    private val particleFactories = listOf<() -> AtmosphereEffect>(
+        { FirefliesEffect() }, { SakuraEffect() }, { SnowEffect() },
+        { AutumnLeavesEffect() }, { BubblesEffect() }, { DustEffect() },
+    )
 
     /** Every atmosphere; they share the intensity, speed, pulse timing, dirty-rect and pointer contracts. */
     private val factories = particleFactories + listOf({ RainEffect() }, { StarfieldEffect() })
@@ -36,6 +43,7 @@ class EffectSettingsTest {
         is SnowEffect -> effect.particleCount
         is RainEffect -> effect.particleCount
         is StarfieldEffect -> effect.particleCount
+        is DriftingParticleEffect -> effect.particleCount
         else -> error(effect.id)
     }
 
@@ -45,6 +53,7 @@ class EffectSettingsTest {
         is SnowEffect -> effect.speedMultiplier
         is RainEffect -> effect.speedMultiplier
         is StarfieldEffect -> effect.speedMultiplier
+        is DriftingParticleEffect -> effect.speedMultiplier
         else -> error(effect.id)
     }
 
@@ -54,6 +63,9 @@ class EffectSettingsTest {
         is SnowEffect -> SnowEffect.particleCountFor(bounds.width, bounds.height, intensity)
         is RainEffect -> RainEffect.particleCountFor(bounds.width, bounds.height, intensity)
         is StarfieldEffect -> StarfieldEffect.particleCountFor(bounds.width, bounds.height, intensity)
+        is AutumnLeavesEffect -> AutumnLeavesEffect.particleCountFor(bounds.width, bounds.height, intensity)
+        is BubblesEffect -> BubblesEffect.particleCountFor(bounds.width, bounds.height, intensity)
+        is DustEffect -> DustEffect.particleCountFor(bounds.width, bounds.height, intensity)
         else -> error(effect.id)
     }
 
@@ -390,6 +402,7 @@ class EffectSettingsTest {
             is SnowEffect -> effect.placeParticleForTest(i, 400f, 300f, 0.8f)
             is RainEffect -> effect.placeParticleForTest(i, 400f, 300f, 0.8f)
             is StarfieldEffect -> effect.placeParticleForTest(i, 400f, 300f, 0.8f)
+            is DriftingParticleEffect -> effect.placeParticleForTest(i, 400f, 300f, 0.8f)
         }
     }
 
@@ -444,6 +457,7 @@ class EffectSettingsTest {
         is SnowEffect -> effect.failureGlow
         is RainEffect -> effect.failureGlow
         is StarfieldEffect -> effect.failureGlow
+        is DriftingParticleEffect -> effect.failureGlow
         else -> error(effect.id)
     }
 
@@ -453,6 +467,7 @@ class EffectSettingsTest {
         is SnowEffect -> effect.glow
         is RainEffect -> effect.glow
         is StarfieldEffect -> effect.glow
+        is DriftingParticleEffect -> effect.glow
         else -> error(effect.id)
     }
 

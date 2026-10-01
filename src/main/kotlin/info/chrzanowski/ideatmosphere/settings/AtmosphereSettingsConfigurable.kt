@@ -44,6 +44,13 @@ class AtmosphereSettingsConfigurable internal constructor(
     private var draft: AtmosphereSettingsState.State? = null
     private var draftEnabled = false
     private var effectDescription: JEditorPane? = null
+    private var effectCombo: ComboBox<String>? = null
+    private var intensitySlider: JSlider? = null
+    private var speedSlider: JSlider? = null
+
+    /** Live preview of the drafted atmosphere, intensity and speed; `null` before the component is created. */
+    internal var preview: AtmospherePreviewPanel? = null
+        private set
 
     private fun currentDraft(): AtmosphereSettingsState.State = checkNotNull(draft)
 
@@ -64,11 +71,23 @@ class AtmosphereSettingsConfigurable internal constructor(
                     .bindItem({ currentDraft().effectId }, { currentDraft().effectId = it ?: AtmosphereEffects.DEFAULT_ID })
                     .applyToComponent {
                         name = "effectId"
-                        addItemListener { if (it.stateChange == ItemEvent.SELECTED) showDescription(it.item as? String) }
+                        addItemListener {
+                            if (it.stateChange == ItemEvent.SELECTED) {
+                                showDescription(it.item as? String)
+                                updatePreview()
+                            }
+                        }
                     }
+                    .also { effectCombo = it.component }
             }
             row("") {
                 effectDescription = comment("").applyToComponent { name = "effectDescription" }.component
+            }
+            row("") {
+                preview = cell(AtmospherePreviewPanel())
+                    .align(AlignX.FILL)
+                    .comment(AtmosphereBundle.message("settings.preview.live.comment"))
+                    .component
             }
             row(AtmosphereBundle.message("settings.intensity")) {
                 percentSlider(
@@ -77,7 +96,7 @@ class AtmosphereSettingsConfigurable internal constructor(
                     AtmosphereBundle.message("settings.intensity.max"),
                     { currentDraft().intensity },
                     { currentDraft().intensity = it },
-                )
+                ).also { intensitySlider = it.component }
             }
             row(AtmosphereBundle.message("settings.speed")) {
                 percentSlider(
@@ -86,7 +105,7 @@ class AtmosphereSettingsConfigurable internal constructor(
                     AtmosphereBundle.message("settings.speed.max"),
                     { currentDraft().speed },
                     { currentDraft().speed = it },
-                )
+                ).also { speedSlider = it.component }
             }
             group(AtmosphereBundle.message("settings.behaviour")) {
                 row {
@@ -147,7 +166,10 @@ class AtmosphereSettingsConfigurable internal constructor(
                 }
             }
         }
+        intensitySlider?.addChangeListener { updatePreview() }
+        speedSlider?.addChangeListener { updatePreview() }
         showDescription(currentDraft().effectId)
+        updatePreview()
         return panel!!
     }
 
@@ -186,6 +208,15 @@ class AtmosphereSettingsConfigurable internal constructor(
         effectDescription?.text = id?.let { AtmosphereBundle.messageOrNull("effect.$it.description") } ?: ""
     }
 
+    /** Feeds the values currently shown in the components (not yet applied to the draft) to the preview. */
+    private fun updatePreview() {
+        val target = preview ?: return
+        val id = effectCombo?.selectedItem as? String ?: currentDraft().effectId
+        val intensity = intensitySlider?.value?.toScale() ?: currentDraft().intensity
+        val speed = speedSlider?.value?.toScale() ?: currentDraft().speed
+        target.configure(id, intensity, speed)
+    }
+
     override fun isModified(): Boolean = panel?.let {
         it.isModified() || currentDraft() != settings.state.normalized() || draftEnabled != readEnabled()
     } ?: false
@@ -210,6 +241,10 @@ class AtmosphereSettingsConfigurable internal constructor(
         draft = null
         draftEnabled = false
         effectDescription = null
+        effectCombo = null
+        intensitySlider = null
+        speedSlider = null
+        preview = null
     }
 }
 
