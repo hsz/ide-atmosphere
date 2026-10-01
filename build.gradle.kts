@@ -8,10 +8,10 @@ plugins {
 
 // Read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin.html
 dependencies {
-    testImplementation(libs.junit)
+    testImplementation("junit:junit:4.13.2")
     // Virtual-time testing of the idle producer; the platform already bundles kotlinx-coroutines-core, so only the
     // test artifact is added and its transitive core dependency is excluded to avoid a duplicate on the classpath.
-    testImplementation(libs.kotlinx.coroutines.test) {
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2") {
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core-jvm")
     }

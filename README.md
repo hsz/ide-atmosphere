@@ -160,7 +160,7 @@ live behind optional `com.intellij.modules.vcs` / `Git4Idea` descriptors (`META-
 ├── src/main/resources/META-INF/ide-atmosphere-vcs.xml · ide-atmosphere-git.xml   Optional VCS / Git descriptors
 ├── src/main/resources/messages/             Message bundle
 ├── src/test/kotlin/...                      Tests mirroring the main packages
-├── build.gradle.kts · settings.gradle.kts · gradle/libs.versions.toml
+├── build.gradle.kts · settings.gradle.kts
 └── CHANGELOG.md · README.md
 ```
 
