@@ -7,7 +7,7 @@
 ### Added
 
 - `SnowEffect`: a third atmosphere — layered snowflakes with depth (near flakes larger, brighter and faster), gentle sway and wind, theme-aware white / blue-grey colours, the same idle, activity, success and failure reactions and cursor avoidance as the other atmospheres.
-- Optional, smooth mouse avoidance for every atmosphere using passive cursor observation without consuming input; particles within 180 px accelerate away (up to 260 px/s) and glide back afterwards.
+- Optional, smooth mouse avoidance for every atmosphere using passive cursor observation without consuming input; particles within 180 px accelerate away (up to 120 px/s) and glide back afterwards.
 - Motion-only outcome reactions: a success lifts the whole field for a moment (fireflies also brighten), a failure scatters the fireflies or sends one gust through petals and snow while everything dims briefly. **Preview success** / **Preview failure** buttons play them on the open windows.
 - External-system activity tracking for project sync and task execution, including Gradle, with neutral cancellation.
 - Platform investigation write-up (`docs/overlay-investigation.md`) documenting the glass-pane painter approach, repaint cost measurements and rejected alternatives.
@@ -34,6 +34,8 @@
 - Application deactivation fades the atmosphere out and stops the ticker instead of throttling to 4 FPS; `AtmosphereStats` reports the effective mode as `normal` / `calm` / `fading`.
 
 ### Fixed
+
+- Particles fleeing the cursor left a fading "after shadow": at up to 260 px/s they jumped 10+ px per frame at the 20–30 FPS animation rate. The escape speed cap is now 120 px/s (with a proportionally gentler acceleration), so each frame moves only a few pixels. Dirty-region coverage during avoidance is now covered by a regression test for all atmospheres.
 
 - A Gradle run configuration was reported by both the Run/Debug listener and the external-system listener, producing two outcomes per run (and, for Sakura, two opposing gusts that could cancel each other). External-system process handlers are now left to the external-system producer, and a gust keeps one direction while it is active.
 - Aborted builds now finish neutrally instead of producing a failure reaction.

@@ -26,7 +26,7 @@ for the platform investigation behind that choice.
 - **Smooth.** Fireflies are rendered at sub-pixel positions (float geometry, antialiasing, `STROKE_PURE`) at a
   governed 20–30 FPS with real `deltaTime`, so they glide instead of hopping between pixels.
 - **Runs away from the cursor.** Particles within 180 px of the pointer accelerate smoothly away from it (up to
-  260 px/s right under the cursor) and glide back into their own motion once it has moved on. This has its own
+  120 px/s right under the cursor) and glide back into their own motion once it has moved on. This has its own
   toggle, independent of activity reactions.
 - **Reacts to the IDE — with motion, never with colour.** Indexing, project builds, Run/Debug processes and external
   project sync/tasks (including Gradle) speed the particles up while they run. A success makes the whole field rise

@@ -243,6 +243,33 @@ class EffectSettingsTest {
         }
     }
 
+    @Test
+    fun `particles fleeing the pointer leave no uncovered stale pixels`() {
+        val bounds = Rectangle(0, 0, 800, 600)
+        for (factory in factories) {
+            for (step in listOf(1f / 60f, 1f / 24f, 0.1f)) {
+                val effect = started(factory)
+                val dirty = DirtyRegionCollector(100)
+                repeat(60) { dirty.clear(); effect.update(step, bounds, dirty) }
+                var before = paint(effect, bounds)
+                repeat(120) { tick ->
+                    effect.onPointerChanged(100f + tick * 5f, 100f + tick * 3f, true)
+                    dirty.clear()
+                    effect.update(step, bounds, dirty)
+                    val after = paint(effect, bounds)
+                    val regions = ArrayList<Rectangle>()
+                    dirty.merge(bounds) { regions.add(Rectangle(it)) }
+                    for (y in 0 until bounds.height) for (x in 0 until bounds.width) {
+                        if (before.getRGB(x, y) != after.getRGB(x, y)) {
+                            assertTrue("${effect.id} step=$step tick=$tick: changed pixel ($x,$y) must be covered", regions.any { it.contains(x, y) })
+                        }
+                    }
+                    before = after
+                }
+            }
+        }
+    }
+
     /** Stacks every particle at (400, 300) of the 800×600 test bounds so that motion, not spread, drives the centroid. */
     private fun placeAllAtCentre(effect: AtmosphereEffect) {
         for (i in 0 until count(effect)) when (effect) {

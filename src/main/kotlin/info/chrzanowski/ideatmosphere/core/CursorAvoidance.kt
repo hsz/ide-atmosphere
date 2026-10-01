@@ -69,11 +69,15 @@ internal class CursorAvoidance(capacity: Int) {
         /** Reach of the pointer in user pixels. */
         const val RADIUS: Float = 180f
 
-        /** Escape speed cap in px/s: well above every atmosphere's own motion, still nowhere near a "jump". */
-        const val MAX_SPEED: Float = 260f
+        /**
+         * Escape speed cap in px/s: clearly above every atmosphere's own motion, yet low enough that a fleeing particle
+         * moves only a few pixels per frame at the 20–30 FPS animation rate. Faster escapes jumped by 10+ px per frame,
+         * which the eye reads as a fading trail (stroboscopic after shadow) behind the particle.
+         */
+        const val MAX_SPEED: Float = 120f
 
         /** Peak acceleration in px/s² right under the pointer; the steady state is `ACCELERATION / DAMPING`. */
-        private const val ACCELERATION = 1300f
+        private const val ACCELERATION = 600f
 
         /** Velocity decay rate in 1/s once the pointer is gone (≈ 0.6 s to settle). */
         private const val DAMPING = 5f

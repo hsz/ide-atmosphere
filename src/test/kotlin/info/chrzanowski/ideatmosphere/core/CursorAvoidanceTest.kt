@@ -15,9 +15,9 @@ class CursorAvoidanceTest {
             avoidance.advance(1, 100f, 80f, 1f / 30f, 1f)
             avoidance.advance(2, 500f, 100f, 1f / 30f, 1f)
         }
-        assertTrue("a particle right next to the pointer must clearly escape", avoidance.velocityX(0) > 150f)
+        assertTrue("a particle right next to the pointer must clearly escape", avoidance.velocityX(0) > 80f)
         assertEquals(0f, avoidance.velocityY(0), 0f)
-        assertTrue(avoidance.velocityY(1) < -100f)
+        assertTrue(avoidance.velocityY(1) < -60f)
         assertEquals(0f, avoidance.velocityX(1), 0f)
         assertEquals("outside the radius nothing happens", 0f, avoidance.velocityX(2), 0f)
         assertTrue(hypot(avoidance.velocityX(0), avoidance.velocityY(0)) <= CursorAvoidance.MAX_SPEED)
