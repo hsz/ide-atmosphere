@@ -13,11 +13,15 @@
     <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
     <description><![CDATA[
-        Paints a subtle, animated <em>fireflies</em> particle field across the whole IDE window &mdash; editor,
-        tool windows, toolbar and status bar &mdash; without ever touching input, editor content or languages.<br><br>
-        The atmosphere lives on the frame's glass pane, never intercepts mouse or keyboard events, adapts to Light
-        and Dark themes, calms down when you are idle, and pauses in Power Save mode or when the window is hidden.<br><br>
-        Toggle it via <b>View | Appearance | Atmosphere</b>.
+        A quiet, living layer over your IDE: <em>Fireflies</em> on a summer night, <em>Sakura</em> petals in a spring
+        breeze or softly falling <em>Snow</em>, painted across the whole window &mdash; editor, tool windows, toolbar and
+        status bar &mdash; without ever intercepting input or touching your code.<br><br>
+        The atmosphere lives on the frame's glass pane, adapts to Light and Dark themes, calms down when you are idle
+        and pauses in Power Save mode or when the window is in the background. Particles drift away from your mouse
+        pointer, speed up while the IDE is busy (builds, indexing, runs, Gradle sync), rise for a moment when something
+        succeeds and shiver when something fails.<br><br>
+        Pick an atmosphere and set intensity and speed under <b>Settings | Appearance &amp; Behavior | Atmosphere</b>;
+        toggle it via <b>View | Appearance | Atmosphere</b>.
         ]]></description>
 
     <!-- Product and plugin compatibility requirements.

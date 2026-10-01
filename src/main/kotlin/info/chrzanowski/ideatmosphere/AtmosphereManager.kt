@@ -253,6 +253,7 @@ class AtmosphereManager(
     fun setApplicationActive(active: Boolean) {
         if (disposed || isApplicationActive == active) return
         isApplicationActive = active
+        if (!active) registrations.values.forEach { it.atmosphere?.clearPointer() }
 
         val state = AtmosphereSettingsState.getInstance().state
         if (!state.pauseOnFocusLoss && !active) return
@@ -277,7 +278,7 @@ class AtmosphereManager(
             val atmosphere = registration.atmosphere ?: continue
             atmosphere.effect.setIntensity(state.intensity)
             atmosphere.effect.setSpeedScale(state.speed)
-            atmosphere.effect.onReactionProfileChanged(state.reactionProfile())
+            atmosphere.cursorAvoidanceEnabled = state.avoidMouse
         }
 
         // 3. React to activity
@@ -317,13 +318,25 @@ class AtmosphereManager(
         updateTicker()
     }
 
+    /**
+     * Plays a `SUCCESS` / `FAILURE` reaction on every live frame, e.g. from the settings page. Deliberately ignores
+     * `reactToActivity` (the user asked for it explicitly) and never touches the activity counters.
+     */
+    @RequiresEdt
+    fun previewOutcome(event: AtmosphereEvent) {
+        if (disposed || (event != AtmosphereEvent.SUCCESS && event != AtmosphereEvent.FAILURE)) return
+        for (registration in registrations.values) {
+            val atmosphere = registration.atmosphere ?: continue
+            if (!atmosphere.paused && !atmosphere.isDormant) atmosphere.publish(event)
+        }
+    }
+
     private fun activate(registration: Registration) {
         if (registration.atmosphere != null || registration.parentDisposed) return
         val attachDisposable = Disposer.newDisposable(registration.parent, "IDE Atmosphere frame")
         val state = AtmosphereSettingsState.getInstance().state
         registration.effect.setIntensity(state.intensity)
         registration.effect.setSpeedScale(state.speed)
-        registration.effect.onReactionProfileChanged(state.reactionProfile())
         val atmosphere = FrameAtmosphere(
             rootPane = registration.rootPane,
             effect = registration.effect,
@@ -331,6 +344,7 @@ class AtmosphereManager(
             maxParticles = FirefliesEffect.MAX_PARTICLES,
         )
         atmosphere.paused = isPaused
+        atmosphere.cursorAvoidanceEnabled = state.avoidMouse
         // Before attach the opacity snaps: a frame that appears while the IDE is in the background starts dormant.
         atmosphere.setVisible(isApplicationActive || !state.pauseOnFocusLoss)
         atmosphere.attach(attachDisposable)

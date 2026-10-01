@@ -55,13 +55,16 @@ class BuildActivityProducerTest : BasePlatformTestCase() {
         producer.onTerminated(isAborted = false, hasErrors = true)
         UIUtil.dispatchAllInvocationEvents()
         assertEquals(listOf(AtmosphereEvent.FAILURE), effect.events)
-        
-        effect.events.clear()
-        
-        // Aborted
-        producer.onTerminated(isAborted = true, hasErrors = false)
-        UIUtil.dispatchAllInvocationEvents()
-        assertEquals(listOf(AtmosphereEvent.FAILURE), effect.events)
+    }
+
+    fun `test aborted builds finish neutrally without a negative visual outcome`() {
+        for (errors in listOf(false, true)) {
+            effect.events.clear()
+            producer.onStarted()
+            producer.onTerminated(isAborted = true, hasErrors = errors)
+            UIUtil.dispatchAllInvocationEvents()
+            assertEquals(listOf(AtmosphereEvent.ACTIVITY_STARTED, AtmosphereEvent.ACTIVITY_FINISHED), effect.events)
+        }
     }
 
     fun `test settings respect`() {

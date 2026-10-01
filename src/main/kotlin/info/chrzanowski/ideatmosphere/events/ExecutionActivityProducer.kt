@@ -4,16 +4,22 @@ import com.intellij.execution.ExecutionListener
 import com.intellij.execution.process.ProcessHandler
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.externalSystem.service.execution.ExternalSystemProcessHandler
 import com.intellij.openapi.project.Project
 import info.chrzanowski.ideatmosphere.AtmosphereManager
 
 /**
  * Publishes ACTIVITY_STARTED/ACTIVITY_FINISHED and SUCCESS/FAILURE when a Run/Debug process starts/terminates,
  * per the plan's Run/Debug producer.
+ *
+ * Gradle (and other external-system) run configurations are skipped here: they are reported by
+ * [ExternalSystemActivityProducer], which also knows about cancellation. Handling them in both places produced two
+ * outcomes per run.
  */
 class ExecutionActivityProducer : ExecutionListener {
 
     override fun processStarted(executorId: String, env: ExecutionEnvironment, handler: ProcessHandler) {
+        if (handler is ExternalSystemProcessHandler) return
         onStarted(env.project)
     }
 
@@ -23,6 +29,7 @@ class ExecutionActivityProducer : ExecutionListener {
         handler: ProcessHandler,
         exitCode: Int
     ) {
+        if (handler is ExternalSystemProcessHandler) return
         onTerminated(env.project, exitCode)
     }
 

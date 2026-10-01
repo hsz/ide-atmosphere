@@ -3,7 +3,6 @@ package info.chrzanowski.ideatmosphere
 import info.chrzanowski.ideatmosphere.core.AtmosphereEffect
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
 import info.chrzanowski.ideatmosphere.core.AtmospherePalette
-import info.chrzanowski.ideatmosphere.core.AtmosphereReactionProfile
 import info.chrzanowski.ideatmosphere.core.EffectContext
 import info.chrzanowski.ideatmosphere.render.DirtyRegionCollector
 import java.awt.Color
@@ -27,7 +26,9 @@ open class RecordingEffect(override val id: String = "recording") : AtmosphereEf
     var context: EffectContext? = null
     var lastIntensity = 1f
     var lastSpeedScale = 1f
-    var lastReactionProfile: AtmosphereReactionProfile? = null
+    var pointerX = 0f
+    var pointerY = 0f
+    var pointerInside = false
 
     /** Regions (x, y, w, h) reported on each update; empty list → update returns `false`. */
     val regions = ArrayList<FloatArray>()
@@ -63,8 +64,10 @@ open class RecordingEffect(override val id: String = "recording") : AtmosphereEf
         palettes.add(palette)
     }
 
-    override fun onReactionProfileChanged(profile: AtmosphereReactionProfile) {
-        lastReactionProfile = profile.deepCopy()
+    override fun onPointerChanged(x: Float, y: Float, inside: Boolean) {
+        pointerX = x
+        pointerY = y
+        pointerInside = inside
     }
 
     override fun setIntensity(scale: Float) {

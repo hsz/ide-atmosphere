@@ -40,14 +40,17 @@ interface AtmosphereEffect {
      */
     fun paint(g: Graphics2D, clip: Rectangle)
 
-    /** Reacts to a semantic IDE event; default no-op. */
+    /**
+     * Reacts to a semantic IDE event; default no-op. `SUCCESS` / `FAILURE` may also arrive as explicit previews
+     * from the settings page, so they must be safe at any time, including back-to-back.
+     */
     fun onEvent(event: AtmosphereEvent) {}
 
     /** The theme changed; rebuild cached colors here, never inside [paint]. Default no-op. */
     fun onPaletteChanged(palette: AtmospherePalette) {}
 
-    /** Applies the shared reaction timings without restarting the effect. */
-    fun onReactionProfileChanged(profile: AtmosphereReactionProfile) {}
+    /** Observes the cursor in root-pane coordinates without receiving or consuming mouse input. */
+    fun onPointerChanged(x: Float, y: Float, inside: Boolean) {}
 
     /**
      * Updates the intensity of the effect.

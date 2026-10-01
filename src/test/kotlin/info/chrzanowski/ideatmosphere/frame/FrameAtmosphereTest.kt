@@ -12,6 +12,7 @@ import info.chrzanowski.ideatmosphere.core.EffectContext
 import info.chrzanowski.ideatmosphere.render.AtmospherePainter
 import java.awt.Color
 import java.awt.Rectangle
+import java.awt.event.MouseEvent
 import java.awt.image.BufferedImage
 import javax.swing.JComponent
 import javax.swing.JPanel
@@ -92,6 +93,61 @@ class FrameAtmosphereTest : BasePlatformTestCase() {
 
     private fun newAtmosphere(target: FrameAtmosphere.RepaintTarget = FrameAtmosphere.SwingRepaintTarget(rootPane)) =
         FrameAtmosphere(rootPane, effect, EffectContext.forTesting(), maxParticles = 8, target = target)
+
+    fun `test pointer observation converts nested coordinates and never consumes input`() {
+        val atmosphere = newAtmosphere(FakeTarget())
+        atmosphere.attach(parent)
+        val child = JPanel()
+        rootPane.layeredPane.add(child)
+        child.setBounds(30, 40, 100, 100)
+        val event = MouseEvent(child, MouseEvent.MOUSE_DRAGGED, 0L, 0, 10, 20, 0, false)
+        atmosphere.observePointer(event)
+        assertEquals(40f, effect.pointerX)
+        assertEquals(60f, effect.pointerY)
+        assertTrue(effect.pointerInside)
+        assertFalse(event.isConsumed)
+        assertTrue(atmosphere.isPointerTracking)
+
+        val crossing = MouseEvent(child, MouseEvent.MOUSE_EXITED, 0L, 0, 110, 20, 0, false)
+        atmosphere.observePointer(crossing)
+        assertTrue("Exiting a child inside the frame must not clear the cursor", effect.pointerInside)
+        atmosphere.observePointer(MouseEvent(rootPane, MouseEvent.MOUSE_EXITED, 0L, 0, -1, 20, 0, false))
+        assertFalse(effect.pointerInside)
+    }
+
+    fun `test pointer listener follows toggle visibility pause and disposal`() {
+        val atmosphere = newAtmosphere(FakeTarget())
+        atmosphere.attach(parent)
+        val move = MouseEvent(rootPane, MouseEvent.MOUSE_MOVED, 0L, 0, 100, 100, 0, false)
+        rootPane.dispatchEvent(move)
+        assertTrue(effect.pointerInside)
+        assertFalse(move.isConsumed)
+        atmosphere.cursorAvoidanceEnabled = false
+        assertFalse(atmosphere.isPointerTracking)
+        assertFalse(effect.pointerInside)
+        atmosphere.observePointer(move)
+        assertFalse(effect.pointerInside)
+        atmosphere.cursorAvoidanceEnabled = true
+        atmosphere.observePointer(move)
+        assertTrue(effect.pointerInside)
+        atmosphere.paused = true
+        assertFalse(effect.pointerInside)
+        atmosphere.observePointer(move)
+        assertFalse(effect.pointerInside)
+        atmosphere.paused = false
+        atmosphere.observePointer(move)
+        atmosphere.setVisible(false)
+        assertFalse(effect.pointerInside)
+        atmosphere.observePointer(move)
+        assertFalse(effect.pointerInside)
+        atmosphere.setVisible(true)
+        atmosphere.observePointer(move)
+        atmosphere.observePointer(MouseEvent(JPanel(), MouseEvent.MOUSE_MOVED, 0L, 0, 5, 5, 0, false))
+        assertFalse("Unrelated windows must not repel this frame's particles", effect.pointerInside)
+        Disposer.dispose(parent)
+        assertFalse(atmosphere.isPointerTracking)
+        assertFalse(atmosphere.isAttached)
+    }
 
     fun `test attach registers the painter and shows the glass pane`() {
         assertFalse(glassPane.isVisible)

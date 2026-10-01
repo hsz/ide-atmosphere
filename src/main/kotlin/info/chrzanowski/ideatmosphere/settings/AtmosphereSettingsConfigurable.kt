@@ -1,28 +1,31 @@
 package info.chrzanowski.ideatmosphere.settings
 
 import com.intellij.openapi.options.Configurable
-import com.intellij.openapi.options.ConfigurationException
 import com.intellij.openapi.ui.DialogPanel
 import com.intellij.ui.dsl.builder.*
 import com.intellij.ui.dsl.listCellRenderer.textListCellRenderer
 import info.chrzanowski.ideatmosphere.AtmosphereBundle
 import info.chrzanowski.ideatmosphere.AtmosphereManager
-import info.chrzanowski.ideatmosphere.core.EnvelopeSettings
+import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
 import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
-import java.text.ParseException
+import java.awt.event.ItemEvent
 import javax.swing.JComponent
+import javax.swing.JEditorPane
 import javax.swing.JLabel
-import javax.swing.JSpinner
-import javax.swing.SpinnerNumberModel
+import javax.swing.JSlider
 import kotlin.math.roundToInt
 
 /**
  * Settings UI for the Atmosphere plugin, appearing under Appearance & Behavior.
+ *
+ * All edits go to an independent draft: Apply persists the draft once and then notifies the manager, Reset reloads
+ * the live settings, and disposing the page discards the draft. Intensity and speed are edited as whole percents.
  */
 class AtmosphereSettingsConfigurable internal constructor(
     private val settings: AtmosphereSettingsState,
     private val readEnabled: () -> Boolean,
-    private val applySettings: (Boolean) -> Unit
+    private val applySettings: (Boolean) -> Unit,
+    private val previewOutcome: (AtmosphereEvent) -> Unit = { AtmosphereManager.getInstance().previewOutcome(it) },
 ) : Configurable {
 
     constructor() : this(
@@ -32,28 +35,13 @@ class AtmosphereSettingsConfigurable internal constructor(
             val manager = AtmosphereManager.getInstance()
             manager.isEnabled = enabled
             manager.applySettings()
-        }
+        },
     )
 
     private var panel: DialogPanel? = null
     private var draft: AtmosphereSettingsState.State? = null
     private var draftEnabled = false
-    private val envelopeControls = mutableListOf<EnvelopeControl>()
-
-    private data class EnvelopeControl(
-        val spinner: JSpinner,
-        val read: () -> Float,
-        val write: (Float) -> Unit
-    ) {
-        fun editedValue(): Float {
-            val field = (spinner.editor as JSpinner.DefaultEditor).textField
-            return if (field.text == field.formatter.valueToString(spinner.value)) {
-                (spinner.value as Number).toFloat()
-            } else {
-                (field.formatter.stringToValue(field.text) as Number).toFloat()
-            }
-        }
-    }
+    private var effectDescription: JEditorPane? = null
 
     private fun currentDraft(): AtmosphereSettingsState.State = checkNotNull(draft)
 
@@ -68,29 +56,57 @@ class AtmosphereSettingsConfigurable internal constructor(
                 checkBox(AtmosphereBundle.message("settings.enabled"))
                     .bindSelected(::draftEnabled)
                     .applyToComponent { name = "enabled" }
+            }.bottomGap(BottomGap.SMALL)
+            row(AtmosphereBundle.message("settings.effect")) {
+                comboBox(AtmosphereEffects.ids.toList(), textListCellRenderer { id -> id?.let(::effectName) })
+                    .bindItem({ currentDraft().effectId }, { currentDraft().effectId = it ?: AtmosphereEffects.DEFAULT_ID })
+                    .applyToComponent {
+                        name = "effectId"
+                        addItemListener { if (it.stateChange == ItemEvent.SELECTED) showDescription(it.item as? String) }
+                    }
             }
-            group(AtmosphereBundle.message("settings.displayName")) {
-                row(AtmosphereBundle.message("settings.effect")) {
-                    comboBox(AtmosphereEffects.ids.toList(), textListCellRenderer { value ->
-                        if (value != null) {
-                            // Fallback to the ID itself if the bundle key is missing
-                            runCatching { AtmosphereBundle.message("effect.$value.name") }.getOrDefault(value)
-                        } else ""
-                    }).bindItem({ currentDraft().effectId }, { value ->
-                        currentDraft().effectId = value ?: AtmosphereEffects.DEFAULT_ID
-                    }).applyToComponent { name = "effectId" }
+            row("") {
+                effectDescription = comment("").applyToComponent { name = "effectDescription" }.component
+            }
+            row(AtmosphereBundle.message("settings.intensity")) {
+                percentSlider(
+                    "intensity",
+                    AtmosphereBundle.message("settings.intensity.min"),
+                    AtmosphereBundle.message("settings.intensity.max"),
+                    { currentDraft().intensity },
+                    { currentDraft().intensity = it },
+                )
+            }
+            row(AtmosphereBundle.message("settings.speed")) {
+                percentSlider(
+                    "speed",
+                    AtmosphereBundle.message("settings.speed.min"),
+                    AtmosphereBundle.message("settings.speed.max"),
+                    { currentDraft().speed },
+                    { currentDraft().speed = it },
+                )
+            }
+            group(AtmosphereBundle.message("settings.behaviour")) {
+                row {
+                    checkBox(AtmosphereBundle.message("settings.reactToActivity"))
+                        .bindSelected({ currentDraft().reactToActivity }, { currentDraft().reactToActivity = it })
+                        .applyToComponent { name = "reactToActivity" }
+                        .comment(AtmosphereBundle.message("settings.reactToActivity.comment"))
                 }
-                row(AtmosphereBundle.message("settings.intensity")) {
-                    slider(3, 20, 1, 10)
-                        .labelTable(mapOf(3 to JLabel("0.3"), 10 to JLabel("1.0"), 20 to JLabel("2.0")))
-                        .bindValue({ (currentDraft().intensity * 10f).roundToInt() }, { currentDraft().intensity = it / 10f })
-                        .applyToComponent { name = "intensity" }
+                row {
+                    button(AtmosphereBundle.message("settings.preview.success")) { previewOutcome(AtmosphereEvent.SUCCESS) }
+                        .applyToComponent { name = "previewSuccess" }
+                    button(AtmosphereBundle.message("settings.preview.failure")) { previewOutcome(AtmosphereEvent.FAILURE) }
+                        .applyToComponent { name = "previewFailure" }
                 }
-                row(AtmosphereBundle.message("settings.speed")) {
-                    slider(3, 20, 1, 10)
-                        .labelTable(mapOf(3 to JLabel("0.3"), 10 to JLabel("1.0"), 20 to JLabel("2.0")))
-                        .bindValue({ (currentDraft().speed * 10f).roundToInt() }, { currentDraft().speed = it / 10f })
-                        .applyToComponent { name = "speed" }
+                row {
+                    comment(AtmosphereBundle.message("settings.preview.comment"))
+                        .applyToComponent { name = "previewComment" }
+                }
+                row {
+                    checkBox(AtmosphereBundle.message("settings.avoidMouse"))
+                        .bindSelected({ currentDraft().avoidMouse }, { currentDraft().avoidMouse = it })
+                        .applyToComponent { name = "avoidMouse" }
                 }
                 row {
                     checkBox(AtmosphereBundle.message("settings.pauseOnFocusLoss"))
@@ -98,75 +114,30 @@ class AtmosphereSettingsConfigurable internal constructor(
                         .applyToComponent { name = "pauseOnFocusLoss" }
                 }
             }
-            group(AtmosphereBundle.message("settings.activity")) {
-                row {
-                    checkBox(AtmosphereBundle.message("settings.reactToActivity"))
-                        .bindSelected({ currentDraft().reactToActivity }, { currentDraft().reactToActivity = it })
-                        .applyToComponent { name = "reactToActivity" }
-                        .comment(AtmosphereBundle.message("settings.activity.shared"))
-                }
-                envelopeSection("activity.movement", "settings.envelope.movement") { currentDraft().reactionProfile().movement }
-                envelopeSection("activity.successPulse", "settings.envelope.successPulse") { currentDraft().reactionProfile().successPulse }
-                row {
-                    comment(AtmosphereBundle.message("settings.activity.triggers"))
-                        .applyToComponent { name = "activity.triggers" }
-                }
-            }
-            onApply {
-                val values = try {
-                    envelopeControls.map { it.editedValue() }
-                } catch (_: ParseException) {
-                    throw ConfigurationException(AtmosphereBundle.message("settings.envelope.invalid"))
-                }
-                envelopeControls.zip(values).forEach { (control, value) -> control.write(value) }
-            }
-            onReset {
-                envelopeControls.forEach {
-                    val value = it.read().toDouble()
-                    it.spinner.value = value
-                    (it.spinner.editor as JSpinner.DefaultEditor).textField.value = value
-                }
-            }
-            onIsModified {
-                envelopeControls.any { runCatching { it.editedValue() != it.read() }.getOrDefault(true) }
-            }
         }
+        showDescription(currentDraft().effectId)
         return panel!!
     }
 
-    private fun Panel.envelopeSection(id: String, title: String, envelope: () -> EnvelopeSettings) {
-        group(AtmosphereBundle.message(title)) {
-            row {
-                comment(AtmosphereBundle.message("$title.description"))
-                    .applyToComponent { name = "$id.description" }
-            }
-            envelopeField("$id.attackSeconds", "settings.envelope.attack", 10.0, 0.1,
-                { envelope().attackSeconds }, { envelope().attackSeconds = it }, "$title.attack.description")
-            envelopeField("$id.decaySeconds", "settings.envelope.decay", 10.0, 0.1,
-                { envelope().decaySeconds }, { envelope().decaySeconds = it }, "$title.decay.description")
-            envelopeField("$id.sustainRatio", "settings.envelope.sustain", 1.0, 0.01,
-                { envelope().sustainRatio }, { envelope().sustainRatio = it }, "$title.sustain.description")
-            envelopeField("$id.releaseSeconds", "settings.envelope.release", 10.0, 0.1,
-                { envelope().releaseSeconds }, { envelope().releaseSeconds = it }, "$title.release.description")
-        }
-    }
-
-    private fun Panel.envelopeField(
+    /** Slider over [AtmosphereSettingsState.SCALE_RANGE] in whole percents with a caption at either end. */
+    private fun Row.percentSlider(
         id: String,
-        label: String,
-        maximum: Double,
-        step: Double,
+        minLabel: String,
+        maxLabel: String,
         read: () -> Float,
         write: (Float) -> Unit,
-        description: String
-    ) {
-        row(AtmosphereBundle.message(label)) {
-            val spinner = JSpinner(SpinnerNumberModel(read().toDouble(), 0.0, maximum, step))
-            spinner.editor = JSpinner.NumberEditor(spinner, "0.#######")
-            spinner.name = id
-            cell(spinner).comment(AtmosphereBundle.message(description))
-            envelopeControls += EnvelopeControl(spinner, read, write)
+    ): Cell<JSlider> = slider(MIN_PERCENT, MAX_PERCENT, 0, 0)
+        .labelTable(mapOf(MIN_PERCENT to JLabel(minLabel), MAX_PERCENT to JLabel(maxLabel)))
+        .bindValue({ read().toPercent() }, { write(it.toScale()) })
+        .applyToComponent {
+            name = id
+            paintTicks = false
         }
+
+    private fun effectName(id: String): String = AtmosphereBundle.messageOrNull("effect.$id.name") ?: id
+
+    private fun showDescription(id: String?) {
+        effectDescription?.text = id?.let { AtmosphereBundle.messageOrNull("effect.$it.description") } ?: ""
     }
 
     override fun isModified(): Boolean = panel?.let {
@@ -192,6 +163,13 @@ class AtmosphereSettingsConfigurable internal constructor(
         panel = null
         draft = null
         draftEnabled = false
-        envelopeControls.clear()
+        effectDescription = null
     }
 }
+
+private val MIN_PERCENT = AtmosphereSettingsState.SCALE_RANGE.start.toPercent()
+private val MAX_PERCENT = AtmosphereSettingsState.SCALE_RANGE.endInclusive.toPercent()
+
+private fun Float.toPercent(): Int = (this * 100f).roundToInt()
+
+private fun Int.toScale(): Float = this / 100f

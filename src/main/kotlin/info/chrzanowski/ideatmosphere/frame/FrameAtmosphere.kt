@@ -10,7 +10,11 @@ import info.chrzanowski.ideatmosphere.core.EffectContext
 import info.chrzanowski.ideatmosphere.render.AtmospherePainter
 import info.chrzanowski.ideatmosphere.render.DirtyRegionCollector
 import java.awt.Frame
+import java.awt.AWTEvent
 import java.awt.Rectangle
+import java.awt.Toolkit
+import java.awt.event.AWTEventListener
+import java.awt.event.MouseEvent
 import javax.swing.JComponent
 import javax.swing.JRootPane
 import javax.swing.SwingUtilities
@@ -76,6 +80,23 @@ class FrameAtmosphere(
 
     /** When `true` the simulation is frozen and no repaints are issued (Power Save, hidden frame). */
     var paused: Boolean = false
+        set(value) {
+            field = value
+            if (value) clearPointer()
+        }
+
+    var cursorAvoidanceEnabled: Boolean = true
+        set(value) {
+            field = value
+            updatePointerTracking()
+            if (!value) clearPointer()
+        }
+
+    internal var isPointerTracking: Boolean = false
+        private set
+    private val pointerListener = AWTEventListener { event ->
+        if (event is MouseEvent) observePointer(event)
+    }
 
     val isAttached: Boolean get() = attached
 
@@ -134,6 +155,7 @@ class FrameAtmosphere(
         effect.start(context)
         painter.active = true
         attached = true
+        updatePointerTracking()
         Disposer.register(parent) { detach() }
     }
 
@@ -144,6 +166,8 @@ class FrameAtmosphere(
     fun detach() {
         if (!attached) return
         attached = false
+        updatePointerTracking()
+        clearPointer()
         painter.active = false
         painter.nestedPaint = null
         effect.stop()
@@ -162,7 +186,37 @@ class FrameAtmosphere(
      */
     fun setVisible(visible: Boolean) {
         isVisible = visible
+        if (!visible) clearPointer()
         if (!attached) snapOpacity()
+    }
+
+    fun clearPointer() {
+        effect.onPointerChanged(0f, 0f, false)
+    }
+
+    private fun updatePointerTracking() {
+        val tracking = attached && cursorAvoidanceEnabled
+        if (tracking == isPointerTracking) return
+        val toolkit = Toolkit.getDefaultToolkit()
+        if (tracking) {
+            toolkit.addAWTEventListener(pointerListener, AWTEvent.MOUSE_EVENT_MASK or AWTEvent.MOUSE_MOTION_EVENT_MASK)
+        } else {
+            toolkit.removeAWTEventListener(pointerListener)
+        }
+        isPointerTracking = tracking
+    }
+
+    internal fun observePointer(event: MouseEvent) {
+        if (!attached || !cursorAvoidanceEnabled) return
+        val component = event.component
+        if (paused || !isVisible || !target.isPaintable || component == null ||
+            !SwingUtilities.isDescendingFrom(component, rootPane)) {
+            clearPointer()
+            return
+        }
+        val point = SwingUtilities.convertPoint(component, event.point, rootPane)
+        val inside = point.x >= 0 && point.y >= 0 && point.x < rootPane.width && point.y < rootPane.height
+        effect.onPointerChanged(point.x.toFloat(), point.y.toFloat(), inside)
     }
 
     private fun snapOpacity() {
@@ -182,6 +236,7 @@ class FrameAtmosphere(
         lastTickWasFade = false
         if (!attached || paused || isDormant) return
         if (!target.isPaintable) {
+            clearPointer()
             snapOpacity()
             return
         }

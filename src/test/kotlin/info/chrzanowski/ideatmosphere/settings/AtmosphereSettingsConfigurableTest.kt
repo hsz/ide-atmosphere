@@ -1,16 +1,22 @@
 package info.chrzanowski.ideatmosphere.settings
 
-import com.intellij.openapi.options.ConfigurationException
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import com.intellij.ui.SimpleColoredComponent
+import info.chrzanowski.ideatmosphere.AtmosphereBundle
+import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
+import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
 import java.awt.Component
 import java.awt.Container
+import javax.swing.JButton
 import javax.swing.JCheckBox
 import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JEditorPane
+import javax.swing.JLabel
+import javax.swing.JList
 import javax.swing.JSlider
 import javax.swing.JSpinner
-import javax.swing.SpinnerNumberModel
+import javax.swing.ListCellRenderer
 
 class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
 
@@ -20,6 +26,7 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
     private var enabled = true
     private var applyCalls = 0
     private val committedStates = mutableListOf<AtmosphereSettingsState.State>()
+    private val previews = mutableListOf<AtmosphereEvent>()
 
     override fun setUp() {
         super.setUp()
@@ -27,11 +34,17 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
         enabled = true
         applyCalls = 0
         committedStates.clear()
-        configurable = AtmosphereSettingsConfigurable(settings, { enabled }) {
-            enabled = it
-            applyCalls++
-            committedStates += settings.state.deepCopy()
-        }
+        previews.clear()
+        configurable = AtmosphereSettingsConfigurable(
+            settings = settings,
+            readEnabled = { enabled },
+            applySettings = {
+                enabled = it
+                applyCalls++
+                committedStates += settings.state.deepCopy()
+            },
+            previewOutcome = { previews += it },
+        )
         component = configurable.createComponent()
     }
 
@@ -47,45 +60,48 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
         assertFalse(configurable.isModified())
         assertSame(component, configurable.createComponent())
         assertEquals(0, applyCalls)
+        assertTrue(previews.isEmpty())
     }
 
-    fun `test activity toggle immediately precedes the single shared set of ADSR controls`() {
-        val controls = descendants(component).filter { it is JCheckBox || it is JSpinner }.toList()
-        val firstEnvelope = controls.indexOfFirst { it is JSpinner }
-        assertTrue(firstEnvelope > 0)
-        assertSame(checkBox("reactToActivity"), controls[firstEnvelope - 1])
-        assertTrue(controls.indexOf(checkBox("pauseOnFocusLoss")) < firstEnvelope - 1)
-        assertEquals(8, controls.filterIsInstance<JSpinner>().size)
-        assertTrue(controls.filterIsInstance<JSpinner>().all { it.name.startsWith("activity.") })
+    fun `test plugin-facing constructor exposes the display name`() {
+        assertEquals(AtmosphereBundle.message("settings.displayName"), AtmosphereSettingsConfigurable().displayName)
+        assertEquals(AtmosphereBundle.message("settings.displayName"), configurable.displayName)
     }
 
-    fun `test envelope descriptions explain speed and brightness without editing settings`() {
-        val movement = control<JEditorPane>("activity.movement.description").text
-        val success = control<JEditorPane>("activity.successPulse.description").text
-        assertTrue(movement.contains("slow down"))
-        assertTrue(movement.contains("speed up"))
-        assertTrue(success.contains("brightens existing particles"))
-        assertTrue(success.contains("tracked operation succeeds"))
-        val triggers = control<JEditorPane>("activity.triggers").text
-        assertTrue(triggers.contains("Gradle"))
-        assertTrue(triggers.contains("indexing"))
-        assertTrue(triggers.contains("not tracked"))
-        assertFalse(configurable.isModified())
-        assertEquals(0, applyCalls)
+    fun `test controls appear in the promised order without spinners`() {
+        val order = descendants(component).mapNotNull { it.name }.filter { it in CONTROL_NAMES }.toList()
+
+        assertEquals(CONTROL_NAMES, order)
+        assertTrue(descendants(component).none { it is JSpinner })
     }
 
-    fun `test controls edit a deep draft including enabled until Apply`() {
+    fun `test labels come from the bundle`() {
+        val labels = descendants(component).filterIsInstance<JLabel>().map { it.text }.toList()
+        val comments = descendants(component).filterIsInstance<JEditorPane>().map { normalized(it.text) }.toList()
+
+        assertEquals(AtmosphereBundle.message("settings.enabled"), checkBox("enabled").text)
+        assertEquals(AtmosphereBundle.message("settings.reactToActivity"), checkBox("reactToActivity").text)
+        assertEquals(AtmosphereBundle.message("settings.avoidMouse"), checkBox("avoidMouse").text)
+        assertEquals(AtmosphereBundle.message("settings.pauseOnFocusLoss"), checkBox("pauseOnFocusLoss").text)
+        assertEquals(AtmosphereBundle.message("settings.preview.success"), button("previewSuccess").text)
+        assertEquals(AtmosphereBundle.message("settings.preview.failure"), button("previewFailure").text)
+        for (key in listOf("settings.effect", "settings.intensity", "settings.speed", "settings.behaviour")) {
+            assertTrue(key, AtmosphereBundle.message(key) in labels)
+        }
+        assertTrue(comments.any { it.contains(AtmosphereBundle.message("settings.reactToActivity.comment")) })
+        assertTrue(normalized(control<JEditorPane>("previewComment").text).contains(AtmosphereBundle.message("settings.preview.comment")))
+    }
+
+    fun `test controls edit a draft including enabled until Apply`() {
         val before = settings.state.deepCopy()
+        val effect = nonDefaultEffect()
         checkBox("enabled").isSelected = false
-        comboBox("effectId").selectedItem = "sakura"
-        slider("intensity").value = 15
-        slider("speed").value = 7
+        effectCombo().selectedItem = effect
+        slider("intensity").value = 150
+        slider("speed").value = 30
         checkBox("reactToActivity").isSelected = false
         checkBox("pauseOnFocusLoss").isSelected = false
-        spinner("activity.movement.attackSeconds").value = 2.5
-        spinner("activity.successPulse.sustainRatio").value = 0.35
-        spinner("activity.movement.releaseSeconds").value = 4.5
-        spinner("activity.successPulse.decaySeconds").value = 3.5
+        checkBox("avoidMouse").isSelected = false
 
         assertTrue(configurable.isModified())
         assertEquals(before, settings.state)
@@ -94,223 +110,287 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
 
         configurable.apply()
 
+        val expected = AtmosphereSettingsState.State(
+            effectId = effect,
+            intensity = 1.5f,
+            speed = 0.3f,
+            reactToActivity = false,
+            pauseOnFocusLoss = false,
+            avoidMouse = false,
+        )
+        assertEquals(expected, settings.state)
         assertEquals(1, applyCalls)
-        assertEquals(settings.state, committedStates.single())
+        assertEquals(expected, committedStates.single())
         assertFalse(enabled)
-        assertEquals("sakura", settings.state.effectId)
-        assertEquals(1.5f, settings.state.intensity)
-        assertEquals(0.7f, settings.state.speed)
-        assertFalse(settings.state.reactToActivity)
-        assertFalse(settings.state.pauseOnFocusLoss)
-        assertEquals(2.5f, settings.state.reactionProfile().movement.attackSeconds)
-        assertEquals(0.35f, settings.state.reactionProfile().successPulse.sustainRatio)
-        assertEquals(4.5f, settings.state.reactionProfile().movement.releaseSeconds)
-        assertEquals(3.5f, settings.state.reactionProfile().successPulse.decaySeconds)
         assertFalse(configurable.isModified())
-
-        spinner("activity.movement.attackSeconds").value = 7.5
-        checkBox("enabled").isSelected = true
-        assertEquals(2.5f, settings.state.reactionProfile().movement.attackSeconds)
-        assertFalse(enabled)
-        assertEquals(1, applyCalls)
     }
 
-    fun `test switching themes preserves the shared profile edits`() {
-        val picker = comboBox("effectId")
-        spinner("activity.movement.attackSeconds").value = 2.5
-        spinner("activity.successPulse.releaseSeconds").value = 3.5
-        picker.selectedItem = "sakura"
-        assertEquals(2.5, spinner("activity.movement.attackSeconds").value)
-        assertEquals(3.5, spinner("activity.successPulse.releaseSeconds").value)
-        spinner("activity.movement.attackSeconds").value = 5.5
-        spinner("activity.successPulse.releaseSeconds").value = 6.5
-        picker.selectedItem = "fireflies"
-        assertEquals(5.5, spinner("activity.movement.attackSeconds").value)
-        assertEquals(6.5, spinner("activity.successPulse.releaseSeconds").value)
-        picker.selectedItem = "sakura"
+    fun `test theme change stays in the draft until Apply`() {
+        val effect = nonDefaultEffect()
 
-        assertEquals(5.5, spinner("activity.movement.attackSeconds").value)
+        effectCombo().selectedItem = effect
+
+        assertTrue(configurable.isModified())
+        assertEquals(AtmosphereEffects.DEFAULT_ID, settings.state.effectId)
+        assertEquals(0, applyCalls)
+
         configurable.apply()
-        assertEquals("sakura", settings.state.effectId)
-        assertEquals(5.5f, settings.state.reactionProfile().movement.attackSeconds)
-        assertEquals(6.5f, settings.state.reactionProfile().successPulse.releaseSeconds)
+
+        assertEquals(effect, settings.state.effectId)
+        assertEquals(1, applyCalls)
         assertFalse(configurable.isModified())
     }
 
-    fun `test Reset discards edits and reloads latest persisted values`() {
-        spinner("activity.movement.attackSeconds").value = 7.5
+    fun `test every Apply persists once and notifies once`() {
+        checkBox("avoidMouse").isSelected = false
+        configurable.apply()
+        slider("speed").value = 120
+        configurable.apply()
+
+        assertEquals(2, applyCalls)
+        assertEquals(2, committedStates.size)
+        assertFalse(committedStates[0].avoidMouse)
+        assertEquals(1f, committedStates[0].speed)
+        assertFalse(committedStates[1].avoidMouse)
+        assertEquals(1.2f, committedStates[1].speed)
+        assertEquals(committedStates[1], settings.state)
+    }
+
+    fun `test sliders span 30 to 200 percent`() {
+        for (name in listOf("intensity", "speed")) {
+            assertEquals(30, slider(name).minimum)
+            assertEquals(200, slider(name).maximum)
+            assertEquals(100, slider(name).value)
+        }
+    }
+
+    fun `test slider positions map to intensity and speed`() {
+        for ((percent, scale) in listOf(30 to 0.3f, 100 to 1f, 150 to 1.5f, 200 to 2f)) {
+            slider("intensity").value = percent
+            slider("speed").value = percent
+
+            configurable.apply()
+
+            assertEquals(scale, settings.state.intensity)
+            assertEquals(scale, settings.state.speed)
+            assertEquals(percent, slider("intensity").value)
+            assertEquals(percent, slider("speed").value)
+            assertFalse(configurable.isModified())
+        }
+    }
+
+    fun `test intensity and speed position the sliders`() {
+        for ((scale, percent) in listOf(0.3f to 30, 1f to 100, 1.5f to 150, 2f to 200)) {
+            settings.loadState(AtmosphereSettingsState.State(intensity = scale, speed = scale))
+
+            configurable.reset()
+
+            assertEquals(percent, slider("intensity").value)
+            assertEquals(percent, slider("speed").value)
+            assertFalse(configurable.isModified())
+        }
+    }
+
+    fun `test fractional percents are rounded and keep an untouched page unmodified`() {
+        settings.loadState(AtmosphereSettingsState.State(intensity = 0.556f, speed = 1.234f))
+
+        configurable.reset()
+
+        assertEquals(56, slider("intensity").value)
+        assertEquals(123, slider("speed").value)
+        assertFalse(configurable.isModified())
+
+        configurable.disposeUIResources()
+        component = configurable.createComponent()
+
+        assertEquals(56, slider("intensity").value)
+        assertEquals(123, slider("speed").value)
+        assertFalse(configurable.isModified())
+
+        // Applying a page whose sliders were never moved keeps the saved precision instead of rounding it away.
+        configurable.apply()
+
+        assertEquals(1, applyCalls)
+        assertEquals(0.556f, settings.state.intensity)
+        assertEquals(1.234f, settings.state.speed)
+        assertFalse(configurable.isModified())
+
+        slider("speed").value = 124
+        configurable.apply()
+
+        assertEquals(0.556f, settings.state.intensity)
+        assertEquals(1.24f, settings.state.speed)
+    }
+
+    fun `test slider ends are captioned`() {
+        for ((name, captions) in listOf("intensity" to ("Subtle" to "Vivid"), "speed" to ("Calm" to "Lively"))) {
+            val slider = slider(name)
+            val labels = slider.labelTable
+
+            assertTrue(slider.paintLabels)
+            assertFalse(slider.paintTicks)
+            assertEquals(2, labels.size())
+            assertEquals(captions.first, (labels[30] as JLabel).text)
+            assertEquals(captions.second, (labels[200] as JLabel).text)
+            assertEquals(AtmosphereBundle.message("settings.$name.min"), captions.first)
+            assertEquals(AtmosphereBundle.message("settings.$name.max"), captions.second)
+        }
+    }
+
+    fun `test Reset discards draft edits`() {
         checkBox("enabled").isSelected = false
-        comboBox("effectId").selectedItem = "sakura"
-        val live = AtmosphereSettingsState.State(effectId = "sakura", intensity = 1.7f, speed = 0.6f,
-            reactToActivity = false, pauseOnFocusLoss = false).normalized()
-        live.reactionProfile().movement.attackSeconds = 4.5f
-        live.reactionProfile().successPulse.sustainRatio = 0.75f
-        settings.loadState(live)
+        effectCombo().selectedItem = nonDefaultEffect()
+        slider("intensity").value = 42
+        slider("speed").value = 200
+        checkBox("reactToActivity").isSelected = false
+        checkBox("avoidMouse").isSelected = false
+        checkBox("pauseOnFocusLoss").isSelected = false
+        assertTrue(configurable.isModified())
+
+        configurable.reset()
+
+        assertFalse(configurable.isModified())
+        assertTrue(checkBox("enabled").isSelected)
+        assertEquals(AtmosphereEffects.DEFAULT_ID, effectCombo().selectedItem)
+        assertEquals(100, slider("intensity").value)
+        assertEquals(100, slider("speed").value)
+        assertTrue(checkBox("reactToActivity").isSelected)
+        assertTrue(checkBox("avoidMouse").isSelected)
+        assertTrue(checkBox("pauseOnFocusLoss").isSelected)
+        assertEquals(AtmosphereSettingsState.State(), settings.state)
+        assertEquals(0, applyCalls)
+    }
+
+    fun `test live changes made elsewhere mark the page modified until Reset`() {
+        val effect = nonDefaultEffect()
+        settings.loadState(AtmosphereSettingsState.State(effectId = effect, speed = 0.5f, avoidMouse = false))
         enabled = false
 
+        assertTrue(configurable.isModified())
+
         configurable.reset()
 
-        assertEquals("sakura", comboBox("effectId").selectedItem)
-        assertEquals(17, slider("intensity").value)
-        assertEquals(6, slider("speed").value)
-        assertFalse(checkBox("enabled").isSelected)
-        assertFalse(checkBox("reactToActivity").isSelected)
-        assertFalse(checkBox("pauseOnFocusLoss").isSelected)
-        assertEquals(4.5, spinner("activity.movement.attackSeconds").value)
-        assertEquals(0.75, spinner("activity.successPulse.sustainRatio").value)
-        assertEquals(live, settings.state)
         assertFalse(configurable.isModified())
+        assertFalse(checkBox("enabled").isSelected)
+        assertEquals(effect, effectCombo().selectedItem)
+        assertEquals(50, slider("speed").value)
+        assertFalse(checkBox("avoidMouse").isSelected)
         assertEquals(0, applyCalls)
     }
 
-    fun `test restoring original control values clears modified state`() {
-        val initial = spinner("activity.movement.attackSeconds").value
-        spinner("activity.movement.attackSeconds").value = 8.5
-        assertTrue(configurable.isModified())
-        spinner("activity.movement.attackSeconds").value = initial
-        assertFalse(configurable.isModified())
-
+    fun `test disposing discards the draft`() {
         checkBox("enabled").isSelected = false
-        assertTrue(configurable.isModified())
-        checkBox("enabled").isSelected = true
-        assertFalse(configurable.isModified())
-    }
-
-    fun `test Cancel disposal never commits and reopening starts from live state`() {
-        val original = settings.state.deepCopy()
-        checkBox("enabled").isSelected = false
-        slider("intensity").value = 20
-        spinner("activity.movement.attackSeconds").value = 9.5
-        spinner("activity.successPulse.releaseSeconds").value = 8.5
-        assertTrue(configurable.isModified())
+        effectCombo().selectedItem = nonDefaultEffect()
+        slider("speed").value = 200
 
         configurable.disposeUIResources()
+
         assertFalse(configurable.isModified())
         configurable.apply()
         configurable.reset()
-        assertEquals(original, settings.state)
+        assertEquals(0, applyCalls)
+        assertEquals(AtmosphereSettingsState.State(), settings.state)
         assertTrue(enabled)
-        assertEquals(0, applyCalls)
 
-        val live = original.deepCopy()
-        live.reactionProfile().successPulse.releaseSeconds = 5.5f
-        settings.loadState(live)
-        val disposedComponent = component
         component = configurable.createComponent()
-        assertNotSame(disposedComponent, component)
+
+        assertFalse(configurable.isModified())
         assertTrue(checkBox("enabled").isSelected)
-        assertEquals(10, slider("intensity").value)
-        assertEquals(original.reactionProfile().movement.attackSeconds.toDouble(), spinner("activity.movement.attackSeconds").value)
-        assertEquals(5.5, spinner("activity.successPulse.releaseSeconds").value)
-        assertFalse(configurable.isModified())
+        assertEquals(AtmosphereEffects.DEFAULT_ID, effectCombo().selectedItem)
+        assertEquals(100, slider("speed").value)
     }
 
-    fun `test Cancel after Apply keeps committed values but discards later draft`() {
-        spinner("activity.movement.attackSeconds").value = 2.5
-        checkBox("enabled").isSelected = false
-        configurable.apply()
-        val committed = settings.state.deepCopy()
-        spinner("activity.movement.attackSeconds").value = 9.5
-        spinner("activity.successPulse.releaseSeconds").value = 8.5
-        checkBox("enabled").isSelected = true
+    fun `test combo lists every registered effect with its name`() {
+        val combo = effectCombo()
+        val items = (0 until combo.itemCount).map { combo.getItemAt(it) }
 
-        configurable.disposeUIResources()
-        component = configurable.createComponent()
-
-        assertEquals(committed, settings.state)
-        assertEquals(2.5, spinner("activity.movement.attackSeconds").value)
-        assertEquals(committed.reactionProfile().successPulse.releaseSeconds.toDouble(), spinner("activity.successPulse.releaseSeconds").value)
-        assertFalse(checkBox("enabled").isSelected)
-        assertFalse(enabled)
-        assertEquals(1, applyCalls)
-        assertFalse(configurable.isModified())
-    }
-
-    fun `test every envelope control has correct bounds and retains fractional values`() {
-        val controls = descendants(component).filterIsInstance<JSpinner>().toList()
-        assertEquals(8, controls.size)
-        for (control in controls) {
-            val model = control.model as SpinnerNumberModel
-            assertEquals(0.0, model.minimum)
-            assertEquals(if (control.name.endsWith("sustainRatio")) 1.0 else 10.0, model.maximum)
+        assertEquals(AtmosphereEffects.ids.toList(), items)
+        assertEquals(AtmosphereEffects.DEFAULT_ID, combo.selectedItem)
+        items.forEachIndexed { index, id ->
+            assertEquals(AtmosphereBundle.message("effect.$id.name"), renderedText(combo, id, index))
         }
-        spinner("activity.movement.attackSeconds").value = 0.375
-        spinner("activity.successPulse.sustainRatio").value = 0.625
-        configurable.apply()
-        assertEquals(0.375f, settings.state.reactionProfile().movement.attackSeconds)
-        assertEquals(0.625f, settings.state.reactionProfile().successPulse.sustainRatio)
-        assertFalse(configurable.isModified())
     }
 
-    fun `test Apply reads text edits even before spinner commits them`() {
-        val attack = spinner("activity.movement.attackSeconds")
-        val sustain = spinner("activity.successPulse.sustainRatio")
-        val previousAttack = attack.value
-        val previousSustain = sustain.value
-        (attack.editor as JSpinner.DefaultEditor).textField.text = "2.375"
-        (sustain.editor as JSpinner.DefaultEditor).textField.text = "0.625"
+    fun `test description follows the selected effect without touching settings`() {
+        assertTrue(descriptionText().contains(description(AtmosphereEffects.DEFAULT_ID)))
 
-        assertEquals(previousAttack, attack.value)
-        assertEquals(previousSustain, sustain.value)
-        assertTrue(configurable.isModified())
-        configurable.apply()
+        for (id in AtmosphereEffects.ids) {
+            effectCombo().selectedItem = id
 
-        assertEquals(2.375f, settings.state.reactionProfile().movement.attackSeconds)
-        assertEquals(0.625f, settings.state.reactionProfile().successPulse.sustainRatio)
-        assertEquals(1, applyCalls)
-        assertFalse(configurable.isModified())
-    }
-
-    fun `test invalid envelope text prevents persistence and manager updates`() {
-        val original = settings.state.deepCopy()
-        val attack = spinner("activity.movement.attackSeconds")
-        val sustain = spinner("activity.successPulse.sustainRatio")
-        for ((control, invalid) in listOf(attack to "not a number", attack to "11", attack to "-1",
-            sustain to "2", sustain to "-1")) {
-            checkBox("enabled").isSelected = false
-            (control.editor as JSpinner.DefaultEditor).textField.text = invalid
-            assertTrue(configurable.isModified())
-            try {
-                configurable.apply()
-                fail("Invalid envelope text must prevent Apply: $invalid")
-            } catch (_: ConfigurationException) {
-                assertEquals(original, settings.state)
-                assertTrue(enabled)
-                assertEquals(0, applyCalls)
+            assertTrue(id, descriptionText().contains(description(id)))
+            for (other in AtmosphereEffects.ids - id) {
+                assertFalse("$id vs $other", descriptionText().contains(description(other)))
             }
-            configurable.reset()
-            assertFalse(configurable.isModified())
-            assertTrue(checkBox("enabled").isSelected)
         }
-    }
+        assertEquals(AtmosphereSettingsState.State(), settings.state)
+        assertEquals(0, applyCalls)
 
-    fun `test Reset discards uncommitted spinner text even when model value is unchanged`() {
-        val attack = spinner("activity.movement.attackSeconds")
-        val previous = attack.value
-        (attack.editor as JSpinner.DefaultEditor).textField.text = "2.375"
-        assertTrue(configurable.isModified())
         configurable.reset()
 
-        assertEquals(previous, attack.value)
-        assertEquals((attack.editor as JSpinner.DefaultEditor).textField.formatter.valueToString(previous),
-            (attack.editor as JSpinner.DefaultEditor).textField.text)
+        assertTrue(descriptionText().contains(description(AtmosphereEffects.DEFAULT_ID)))
+    }
+
+    fun `test description of the persisted effect is shown on a fresh page`() {
+        val effect = nonDefaultEffect()
+        settings.loadState(AtmosphereSettingsState.State(effectId = effect))
+        configurable.disposeUIResources()
+
+        component = configurable.createComponent()
+
+        assertEquals(effect, effectCombo().selectedItem)
+        assertTrue(descriptionText().contains(description(effect)))
+        assertFalse(descriptionText().contains(description(AtmosphereEffects.DEFAULT_ID)))
+    }
+
+    fun `test bundle names and describes every effect`() {
+        for (id in AtmosphereEffects.ids + listOf("fireflies", "sakura", "snow")) {
+            assertTrue("effect.$id.name", AtmosphereBundle.containsKey("effect.$id.name"))
+            assertTrue("effect.$id.description", AtmosphereBundle.containsKey("effect.$id.description"))
+            assertTrue(AtmosphereBundle.message("effect.$id.name").isNotBlank())
+            assertTrue(AtmosphereBundle.message("effect.$id.description").isNotBlank())
+        }
+        assertEquals("Snow", AtmosphereBundle.message("effect.snow.name"))
+    }
+
+    fun `test preview buttons fire the callback without persisting`() {
+        slider("intensity").value = 200
+
+        button("previewSuccess").doClick()
+        button("previewFailure").doClick()
+        button("previewSuccess").doClick()
+
+        assertEquals(listOf(AtmosphereEvent.SUCCESS, AtmosphereEvent.FAILURE, AtmosphereEvent.SUCCESS), previews)
+        assertEquals(AtmosphereSettingsState.State(), settings.state)
+        assertEquals(0, applyCalls)
+        assertEquals(200, slider("intensity").value)
+        assertTrue(configurable.isModified())
+    }
+
+    fun `test previews need no validation and work while the atmosphere is disabled`() {
+        enabled = false
+        configurable.reset()
+        assertFalse(checkBox("enabled").isSelected)
+
+        button("previewFailure").doClick()
+
+        assertEquals(listOf(AtmosphereEvent.FAILURE), previews)
         assertFalse(configurable.isModified())
         assertEquals(0, applyCalls)
     }
 
-    fun `test unedited fractional persisted envelopes remain exact after Apply`() {
-        val live = AtmosphereSettingsState.State().normalized()
-        live.reactionProfile().movement.attackSeconds = 0.12345678f
-        live.reactionProfile().successPulse.sustainRatio = 0.23456789f
-        settings.loadState(live)
-        configurable.reset()
+    private fun description(id: String): String = AtmosphereBundle.message("effect.$id.description")
 
-        assertFalse(configurable.isModified())
-        configurable.apply()
+    private fun descriptionText(): String = normalized(control<JEditorPane>("effectDescription").text)
 
-        assertEquals(live, settings.state)
-        assertFalse(configurable.isModified())
-        assertEquals(1, applyCalls)
+    private fun normalized(text: String): String = text.replace(Regex("\\s+"), " ")
+
+    private fun nonDefaultEffect(): String = AtmosphereEffects.ids.first { it != AtmosphereEffects.DEFAULT_ID }
+
+    private fun renderedText(combo: JComboBox<*>, item: Any?, index: Int): String {
+        @Suppress("UNCHECKED_CAST")
+        val renderer = combo.renderer as ListCellRenderer<Any?>
+        val rendered = renderer.getListCellRendererComponent(JList<Any?>(), item, index, false, false)
+        return descendants(rendered).filterIsInstance<SimpleColoredComponent>().single().getCharSequence(false).toString()
     }
 
     private fun descendants(root: Component): Sequence<Component> = sequence {
@@ -324,7 +404,23 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
         descendants(component).filterIsInstance<T>().single { it.name == name }
 
     private fun checkBox(name: String): JCheckBox = control(name)
-    private fun comboBox(name: String): JComboBox<*> = control(name)
     private fun slider(name: String): JSlider = control(name)
-    private fun spinner(name: String): JSpinner = control(name)
+    private fun button(name: String): JButton = control(name)
+    private fun effectCombo(): JComboBox<*> = control("effectId")
+
+    private companion object {
+        val CONTROL_NAMES = listOf(
+            "enabled",
+            "effectId",
+            "effectDescription",
+            "intensity",
+            "speed",
+            "reactToActivity",
+            "previewSuccess",
+            "previewFailure",
+            "previewComment",
+            "avoidMouse",
+            "pauseOnFocusLoss",
+        )
+    }
 }

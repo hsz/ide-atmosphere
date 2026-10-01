@@ -4,7 +4,7 @@ import info.chrzanowski.ideatmosphere.core.AdsrEnvelope
 import info.chrzanowski.ideatmosphere.core.AtmosphereEffect
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
 import info.chrzanowski.ideatmosphere.core.AtmospherePalette
-import info.chrzanowski.ideatmosphere.core.AtmosphereReactionProfile
+import info.chrzanowski.ideatmosphere.core.CursorAvoidance
 import info.chrzanowski.ideatmosphere.core.EffectContext
 import info.chrzanowski.ideatmosphere.render.DirtyRegionCollector
 import java.awt.Color
@@ -38,6 +38,9 @@ import kotlin.math.sqrt
  * Invariant: `prevX/prevY/prevAlpha` are the **on-screen** state. [paint] draws from them and they advance
  * only when a dirty region covering both the old and the new position (plus per-particle halo padding) has
  * been emitted, so the screen is always consistent with what was reported.
+ *
+ * Reactions are motion and brightness only, never colour or shape: a tracked success lifts the swarm briefly and
+ * brightens it ([glow]), a failure scatters and dims it ([failureGlow]).
  *
  * Coordinates are root-pane user-space pixels; sizes are scaled by [EffectContext.uiScale].
  */
@@ -78,6 +81,7 @@ class FirefliesEffect : AtmosphereEffect {
 
     private val coreColors = arrayOfNulls<Color>(ALPHA_STEPS)
     private val haloColors = arrayOfNulls<Color>(ALPHA_STEPS)
+    private val avoidance = CursorAvoidance(MAX_PARTICLES)
 
     // Single reused shape for sub-pixel filling; mutated in `paint` only (EDT).
     private val ellipse = Ellipse2D.Float()
@@ -90,8 +94,12 @@ class FirefliesEffect : AtmosphereEffect {
     var speedMultiplier: Float = 1f
         private set
 
-    /** Extra brightness 0..1 added after [AtmosphereEvent.SUCCESS] (driven by [AdsrEnvelope]). */
+    /** Extra brightness 0..1 after [AtmosphereEvent.SUCCESS] (one-shot [AdsrEnvelope]); the swarm is lifted at the same time. */
     var glow: Float = 0f
+        private set
+
+    /** Dimming 0..1 after [AtmosphereEvent.FAILURE] (one-shot [AdsrEnvelope]); the swarm is scattered at the same time. */
+    var failureGlow: Float = 0f
         private set
 
     private val speedEnvelope = AdsrEnvelope(
@@ -103,6 +111,15 @@ class FirefliesEffect : AtmosphereEffect {
     )
 
     private val glowEnvelope = AdsrEnvelope(
+        restLevel = 0f,
+        attackSeconds = 0.1f,
+        decaySeconds = GLOW_SECONDS,
+        sustainRatio = 0f,
+        releaseSeconds = 0f,
+        oneShot = true,
+    )
+
+    private val failureEnvelope = AdsrEnvelope(
         restLevel = 0f,
         attackSeconds = 0.1f,
         decaySeconds = GLOW_SECONDS,
@@ -125,16 +142,21 @@ class FirefliesEffect : AtmosphereEffect {
         lastHeight = -1
         speedMultiplier = speedScale
         glow = 0f
+        failureGlow = 0f
+        avoidance.clear()
         // Reset envelopes to idle at rest level
         speedEnvelope.release()
         speedEnvelope.advance(100f)
         glowEnvelope.release()
         glowEnvelope.advance(100f)
+        failureEnvelope.release()
+        failureEnvelope.advance(100f)
         started = true
     }
 
     override fun stop() {
         started = false
+        avoidance.clear()
         particleCount = 0
         lastWidth = -1
         lastHeight = -1
@@ -157,10 +179,8 @@ class FirefliesEffect : AtmosphereEffect {
         speedMultiplier = speedEnvelope.value * speedScale
     }
 
-    override fun onReactionProfileChanged(profile: AtmosphereReactionProfile) {
-        val normalized = profile.normalized(AtmosphereReactionProfile.fireflies())
-        speedEnvelope.configure(normalized.movement)
-        glowEnvelope.configure(normalized.successPulse)
+    override fun onPointerChanged(x: Float, y: Float, inside: Boolean) {
+        avoidance.setPointer(x, y, inside)
     }
 
     override fun onEvent(event: AtmosphereEvent) {
@@ -169,8 +189,19 @@ class FirefliesEffect : AtmosphereEffect {
             AtmosphereEvent.USER_ACTIVE -> speedEnvelope.release()
             AtmosphereEvent.ACTIVITY_STARTED -> speedEnvelope.trigger(ACTIVITY_SPEED)
             AtmosphereEvent.ACTIVITY_FINISHED -> speedEnvelope.release()
-            AtmosphereEvent.SUCCESS -> glowEnvelope.trigger(1f)
-            AtmosphereEvent.FAILURE -> scatter()
+            AtmosphereEvent.SUCCESS -> {
+                // A success cancels any running failure dimming; the two never blend.
+                failureEnvelope.release()
+                failureEnvelope.advance(100f)
+                glowEnvelope.trigger(1f)
+                lift()
+            }
+            AtmosphereEvent.FAILURE -> {
+                glowEnvelope.release()
+                glowEnvelope.advance(100f)
+                failureEnvelope.trigger(1f)
+                scatter()
+            }
         }
     }
 
@@ -190,7 +221,8 @@ class FirefliesEffect : AtmosphereEffect {
         // Smooth global modifiers.
         speedMultiplier = speedEnvelope.advance(deltaSeconds) * speedScale
         glow = glowEnvelope.advance(deltaSeconds)
-        val glowBoost = 1f + glow * GLOW_ALPHA_BOOST
+        failureGlow = failureEnvelope.advance(deltaSeconds)
+        val glowBoost = (1f + glow * GLOW_ALPHA_BOOST) * (1f - failureGlow * FAILURE_DIM)
         val opacityScale = palette.opacityScale
 
         for (i in 0 until particleCount) {
@@ -214,8 +246,9 @@ class FirefliesEffect : AtmosphereEffect {
             bobPhase[i] += BOB_RATE * deltaSeconds * speedScale
             val bob = cos(bobPhase[i]) * BOB_AMPLITUDE * uiScale * speedScale
 
-            x[i] += vx[i] * deltaSeconds
-            y[i] += (vy[i] + bob) * deltaSeconds
+            avoidance.advance(i, x[i], y[i], deltaSeconds, uiScale)
+            x[i] += (vx[i] + avoidance.velocityX(i)) * deltaSeconds
+            y[i] += (vy[i] + bob + avoidance.velocityY(i)) * deltaSeconds
 
             if (x[i] < bx || x[i] >= bx + bw || y[i] < by || y[i] >= by + bh) {
                 val padding = haloPadding(i)
@@ -224,7 +257,7 @@ class FirefliesEffect : AtmosphereEffect {
                 continue
             }
 
-            // Opacity: base × pulse × life envelope × glow.
+            // Opacity: base × pulse × life envelope × outcome brightness.
             phase[i] += pulseRate[i] * deltaSeconds
             val pulse = 0.65f + 0.35f * sin(phase[i])
             val envelope = lifeEnvelope(life[i], maxLife[i])
@@ -305,6 +338,14 @@ class FirefliesEffect : AtmosphereEffect {
         return sum / particleCount
     }
 
+    /** Mean vertical velocity in px/s (negative = upward); test helper. */
+    fun meanVerticalVelocity(): Float {
+        if (particleCount == 0) return 0f
+        var sum = 0f
+        for (i in 0 until particleCount) sum += vy[i]
+        return sum / particleCount
+    }
+
     /** Adjusts the particle count to [bounds]; returns `true` if a region was reported for vanished particles. */
     private fun resize(bounds: Rectangle, dirty: DirtyRegionCollector): Boolean {
         val bx = bounds.x.toFloat()
@@ -334,6 +375,7 @@ class FirefliesEffect : AtmosphereEffect {
     }
 
     private fun spawn(i: Int, bx: Float, by: Float, bw: Float, bh: Float, awayFromEdges: Boolean) {
+        avoidance.reset(i)
         val margin = if (awayFromEdges) min(EDGE_MARGIN * uiScale, min(bw, bh) * 0.25f) else 0f
         x[i] = bx + margin + random.nextFloat() * max(1f, bw - 2f * margin)
         y[i] = by + margin + random.nextFloat() * max(1f, bh - 2f * margin)
@@ -353,12 +395,22 @@ class FirefliesEffect : AtmosphereEffect {
         alpha[i] = 0f
     }
 
+    /** Failure: every firefly darts off in its own direction; [IMPULSE_DAMPING] eases it back to cruising. */
     private fun scatter() {
         for (i in 0 until particleCount) {
             val angle = random.nextFloat() * TWO_PI
             val impulse = (SCATTER_IMPULSE_MIN + random.nextFloat() * (SCATTER_IMPULSE_MAX - SCATTER_IMPULSE_MIN)) * uiScale
             vx[i] += cos(angle) * impulse
             vy[i] += sin(angle) * impulse
+        }
+    }
+
+    /** Success: the whole swarm rises together, each firefly a little differently, then settles back. */
+    private fun lift() {
+        for (i in 0 until particleCount) {
+            val impulse = (LIFT_IMPULSE_MIN + random.nextFloat() * (LIFT_IMPULSE_MAX - LIFT_IMPULSE_MIN)) * uiScale
+            vy[i] -= impulse
+            vx[i] += (random.nextFloat() - 0.5f) * LIFT_SPREAD * uiScale
         }
     }
 
@@ -461,6 +513,7 @@ class FirefliesEffect : AtmosphereEffect {
         private const val MIN_BASE_ALPHA = 0.18f
         private const val MAX_BASE_ALPHA = 0.35f
         private const val GLOW_ALPHA_BOOST = 0.6f
+        private const val FAILURE_DIM = 0.3f
         private const val EDGE_MARGIN = 40f
         private const val WANDER_TURN_RATE = 1.2f
         private const val BOB_RATE = 1.5f
@@ -468,6 +521,9 @@ class FirefliesEffect : AtmosphereEffect {
         private const val IMPULSE_DAMPING = 1.2f
         private const val SCATTER_IMPULSE_MIN = 30f
         private const val SCATTER_IMPULSE_MAX = 60f
+        private const val LIFT_IMPULSE_MIN = 25f
+        private const val LIFT_IMPULSE_MAX = 45f
+        private const val LIFT_SPREAD = 10f
         @Suppress("UseJBColor")
         private val TRANSPARENT = Color(0, 0, 0, 0)
 

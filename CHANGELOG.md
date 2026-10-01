@@ -6,7 +6,10 @@
 
 ### Added
 
-- Independent, persisted Fireflies and Sakura movement/success ADSR profiles with editable settings, isolated drafts, Apply/Reset/Cancel coverage and XML serialization tests.
+- `SnowEffect`: a third atmosphere — layered snowflakes with depth (near flakes larger, brighter and faster), gentle sway and wind, theme-aware white / blue-grey colours, the same idle, activity, success and failure reactions and cursor avoidance as the other atmospheres.
+- Optional, smooth mouse avoidance for every atmosphere using passive cursor observation without consuming input; particles within 180 px accelerate away (up to 260 px/s) and glide back afterwards.
+- Motion-only outcome reactions: a success lifts the whole field for a moment (fireflies also brighten), a failure scatters the fireflies or sends one gust through petals and snow while everything dims briefly. **Preview success** / **Preview failure** buttons play them on the open windows.
+- External-system activity tracking for project sync and task execution, including Gradle, with neutral cancellation.
 - Platform investigation write-up (`docs/overlay-investigation.md`) documenting the glass-pane painter approach, repaint cost measurements and rejected alternatives.
 - Effect-agnostic core contracts: `AtmosphereEffect`, `AtmosphereEvent`, `AtmospherePalette`, `EffectContext`.
 - Plugin metadata and `AtmosphereBundle` message bundle.
@@ -22,6 +25,8 @@
 
 ### Changed
 
+- Settings page rebuilt around what matters: atmosphere picker with a one-line description, **Intensity** (Subtle…Vivid) and **Speed** (Calm…Lively) sliders and three behaviour switches. The ADSR envelope editors, their numeric fields and the persisted per-theme/shared reaction profiles are gone; reaction timings are built into each atmosphere.
+- Success no longer paints an expanded, green-tinted halo and failure no longer tints particles red — particles keep their colour and shape at all times; outcomes are expressed through motion and brightness only.
 - Recalibrated the dirty-region cost model and particle densities (Step 15) from fresh built-in display measurements. The per-rectangle fixed cost was raised from 120 µs to 500 µs to reflect real-world Swing repaint overhead, resulting in ≈ 60 % fewer rectangles per tick and a stable active-user CPU cost of ≈ 10 %. Particle density was lowered to stay near the minimum threshold (≈ 20 fireflies, ≈ 16 petals).
 - `DirtyRegionCollector` merges regions by fine-grid bucketing followed by greedy, cost-model-driven agglomeration (fewer, tighter rectangles; a single bounding box whenever it is the cheapest option) instead of a fixed 3×2 cell-union. Recalibrated for the nested batch: per-rectangle fixed cost 120 µs → 500 µs, 12×8 grid, no forced rectangle cap (the cost model alone decides).
 - `FirefliesEffect` `AREA_PER_PARTICLE` 45 000 → 60 000 (≈ 24 fireflies on a 1512×949 frame); slower alpha pulse.
@@ -30,5 +35,7 @@
 
 ### Fixed
 
+- A Gradle run configuration was reported by both the Run/Debug listener and the external-system listener, producing two outcomes per run (and, for Sakura, two opposing gusts that could cancel each other). External-system process handlers are now left to the external-system producer, and a gust keeps one direction while it is active.
+- Aborted builds now finish neutrally instead of producing a failure reaction.
 - Intensity changes now immediately affect existing particle opacity and reconcile population on the next tick, clearing removed particles without a resize. Speed scales normal, idle and busy motion independently of reaction envelopes.
 - Fireflies hopped from pixel to pixel (whole device pixels on Retina) instead of gliding: positions were rounded to integers, dirty regions were reported only when the rounded position changed, and the governor sat at a 10 FPS floor (6 FPS idle, 4 FPS in the background). `FirefliesEffect` now renders a reused `Ellipse2D.Float` at float centres and radii (relying on the painter's `STROKE_PURE`), reports a region for every visible sub-pixel move (`MOVE_EPSILON = 0.02 px`, 256 alpha steps) and runs at 20–30 FPS.

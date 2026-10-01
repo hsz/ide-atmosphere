@@ -14,6 +14,7 @@ import java.awt.Color
 import java.awt.Rectangle
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
+import kotlin.math.abs
 import kotlin.math.sqrt
 
 class FirefliesEffectTest {
@@ -291,6 +292,40 @@ class FirefliesEffectTest {
         assertEquals(1f, effect.glow, 0.001f)
         simulate(effect, bounds, FirefliesEffect.GLOW_SECONDS + 0.5f)
         assertEquals(0f, effect.glow, 0.001f)
+    }
+
+    @Test
+    fun `success lifts the swarm which then settles back to cruising`() {
+        val effect = started()
+        val bounds = Rectangle(0, 0, 1600, 1200)
+        simulate(effect, bounds, 1f)
+        val cruising = effect.meanSpeed()
+        assertTrue("a wandering swarm has no net vertical drift", abs(effect.meanVerticalVelocity()) < 8f)
+        effect.onEvent(AtmosphereEvent.SUCCESS)
+        assertTrue("success must lift the swarm", effect.meanVerticalVelocity() < -20f)
+        assertTrue("the lift must stay gentle", effect.meanSpeed() < cruising + 50f)
+        simulate(effect, bounds, 5f)
+        assertTrue("the lift damps out", abs(effect.meanVerticalVelocity()) < 8f)
+        assertTrue(effect.meanSpeed() < cruising * 1.3f)
+        assertTrue(effect.allInside(bounds))
+    }
+
+    @Test
+    fun `failure dims the swarm and a success cancels the dimming`() {
+        val effect = started()
+        val bounds = Rectangle(0, 0, 800, 600)
+        simulate(effect, bounds, 1f)
+        effect.onEvent(AtmosphereEvent.FAILURE)
+        effect.update(0.1f, bounds, newCollector())
+        assertEquals(1f, effect.failureGlow, 0.001f)
+        effect.onEvent(AtmosphereEvent.SUCCESS)
+        effect.update(0.1f, bounds, newCollector())
+        assertEquals(0f, effect.failureGlow, 0f)
+        assertEquals(1f, effect.glow, 0.001f)
+        effect.onEvent(AtmosphereEvent.FAILURE)
+        effect.update(0.1f, bounds, newCollector())
+        assertEquals(0f, effect.glow, 0f)
+        assertEquals(1f, effect.failureGlow, 0.001f)
     }
 
     @Test

@@ -2,9 +2,6 @@ package info.chrzanowski.ideatmosphere.settings
 
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.*
-import com.intellij.util.xmlb.SkipDefaultValuesSerializationFilters
-import com.intellij.util.xmlb.annotations.Property
-import info.chrzanowski.ideatmosphere.core.AtmosphereReactionProfile
 import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
 
 /**
@@ -20,39 +17,20 @@ class AtmosphereSettingsState : PersistentStateComponent<AtmosphereSettingsState
         var speed: Float = 1f,
         var reactToActivity: Boolean = true,
         var pauseOnFocusLoss: Boolean = true,
-        @get:Property(filter = SkipDefaultValuesSerializationFilters::class)
-        var activityProfile: AtmosphereReactionProfile? = null,
-        @get:Property(filter = SkipDefaultValuesSerializationFilters::class)
-        var firefliesProfile: AtmosphereReactionProfile? = null,
-        @get:Property(filter = SkipDefaultValuesSerializationFilters::class)
-        var sakuraProfile: AtmosphereReactionProfile? = null,
+        var avoidMouse: Boolean = true,
     ) {
-        fun reactionProfile(): AtmosphereReactionProfile = activityProfile ?: when {
-            firefliesProfile != null || sakuraProfile != null -> when (effectId) {
-                "sakura" -> sakuraProfile ?: AtmosphereReactionProfile.sakura()
-                else -> firefliesProfile ?: AtmosphereReactionProfile.fireflies()
-            }
+        /** Detached copy of this state; the state holds plain values only, so [copy] is already deep. */
+        fun deepCopy(): State = copy()
 
-            else -> AtmosphereReactionProfile()
-        }
-
-        fun deepCopy(): State = copy(
-            activityProfile = activityProfile?.deepCopy(),
-            firefliesProfile = firefliesProfile?.deepCopy(),
-            sakuraProfile = sakuraProfile?.deepCopy(),
-        )
-
+        /** Falls back to the default effect for unknown ids and clamps intensity and speed into [SCALE_RANGE]. */
         fun normalized(): State = copy(
             effectId = effectId.takeIf { it in AtmosphereEffects.ids } ?: AtmosphereEffects.DEFAULT_ID,
-            intensity = intensity.takeIf { it.isFinite() }?.coerceIn(0.3f, 2f) ?: 1f,
-            speed = speed.takeIf { it.isFinite() }?.coerceIn(0.3f, 2f) ?: 1f,
-            activityProfile = reactionProfile().normalized(AtmosphereReactionProfile()),
-            firefliesProfile = null,
-            sakuraProfile = null,
+            intensity = intensity.takeIf { it.isFinite() }?.coerceIn(SCALE_RANGE) ?: 1f,
+            speed = speed.takeIf { it.isFinite() }?.coerceIn(SCALE_RANGE) ?: 1f,
         )
     }
 
-    private var myState = State().normalized()
+    private var myState = State()
 
     override fun getState(): State = myState
 
@@ -61,6 +39,9 @@ class AtmosphereSettingsState : PersistentStateComponent<AtmosphereSettingsState
     }
 
     companion object {
+        /** Supported range of the intensity and speed multipliers. */
+        val SCALE_RANGE: ClosedFloatingPointRange<Float> = 0.3f..2f
+
         @JvmStatic
         fun getInstance(): AtmosphereSettingsState =
             ApplicationManager.getApplication().getService(AtmosphereSettingsState::class.java)

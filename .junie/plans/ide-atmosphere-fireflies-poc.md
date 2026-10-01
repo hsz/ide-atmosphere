@@ -4,7 +4,22 @@ sessionId: session-260930-122025-ono9
 
 # Status
 
-### Assessment
+### 2026-10-01 direction change: "make it an art", simplify
+The user rejected the coloured outcome glow/halo ("cheap") and the ADSR-heavy settings page ("overcomplicated"). The
+milestone was re-cut accordingly; the sections below this one describe the *earlier* per-theme-profile design and are
+kept only as history — the persisted reaction profiles, `AtmosphereReactionProfile`, `OutcomeColors`,
+`onReactionProfileChanged` and `previewOutcome(event, profile)` no longer exist.
+
+Delivered in that session (248/248 tests, `buildPlugin` OK, sandbox smoke run with the legacy `activityProfile` XML: no errors, Sakura animating):
+- Outcomes are **motion-only**: success lifts the whole field (fireflies also brighten via the existing `glow`), failure scatters fireflies / sends one consistent-direction gust through petals and snow, plus a brief ~25–30 % dim. Colours and shapes never change; a shared `EffectSettingsTest` asserts this for every atmosphere on both palettes.
+- Third atmosphere **Snow** (`effects/snow/SnowEffect.kt`, depth-layered, same reactions and cursor avoidance), registered in `AtmosphereEffects`.
+- Settings page: enable · atmosphere picker with description · Intensity/Speed sliders (Subtle…Vivid, Calm…Lively) · Behaviour group (react + Preview Success/Failure, avoid mouse, pause in background). State has six plain fields; legacy profile XML is ignored on load.
+- `CursorAvoidance` strengthened (180 px reach, 260 px/s cap) so "running away" is visible; Gradle runs reported once (`ExecutionActivityProducer` skips `ExternalSystemProcessHandler`).
+- README, CHANGELOG and plugin description refreshed.
+
+Still open: Plugin Verifier not run; visual acceptance of Snow and the new settings page by a human; general background-task coverage (unchanged scope).
+
+### Assessment (superseded, kept for history)
 The original fireflies PoC and smoothness fix are complete and human-accepted. The next milestone has implementation recorded through historical steps 10–15, but final integration remains pending and several requirements need correction. This status and the active Requirements, Technical Design, Testing and Delivery Steps below supersede the collapsed historical specification; historical checkmarks do not certify the new acceptance criteria.
 
 | Area | Evidence in the current repository | Remaining work |

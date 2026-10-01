@@ -4,7 +4,7 @@ import info.chrzanowski.ideatmosphere.core.AdsrEnvelope
 import info.chrzanowski.ideatmosphere.core.AtmosphereEffect
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
 import info.chrzanowski.ideatmosphere.core.AtmospherePalette
-import info.chrzanowski.ideatmosphere.core.AtmosphereReactionProfile
+import info.chrzanowski.ideatmosphere.core.CursorAvoidance
 import info.chrzanowski.ideatmosphere.core.EffectContext
 import info.chrzanowski.ideatmosphere.render.DirtyRegionCollector
 import java.awt.Color
@@ -23,6 +23,8 @@ import kotlin.math.sin
  * Drifting, rotating sakura petals.
  *
  * Petals follow a downward fall with a horizontal breeze (sinusoidal sway) and gentle tumble (rotation).
+ * Outcomes are motion only: [AtmosphereEvent.SUCCESS] lifts the petals in a joyful updraft while
+ * [AtmosphereEvent.FAILURE] blows a one-directional gust and briefly dims them; colors never change.
  * The architecture mirrors [info.chrzanowski.ideatmosphere.effects.fireflies.FirefliesEffect] using
  * structure-of-arrays to avoid per-tick allocations.
  *
@@ -64,6 +66,10 @@ class SakuraEffect : AtmosphereEffect {
     private val prevAlpha = FloatArray(MAX_PARTICLES)
 
     private val colors = arrayOfNulls<Color>(ALPHA_STEPS)
+    private val cursorAvoidance = CursorAvoidance(MAX_PARTICLES)
+
+    // Horizontal direction (+1/-1) of the running gust; chosen once per gust so overlapping failures never cancel.
+    private var gustDirection = 0f
 
     // Single reused path for petal drawing; mutated in paint only (EDT).
     private val path = Path2D.Float()
@@ -76,8 +82,12 @@ class SakuraEffect : AtmosphereEffect {
     var speedMultiplier: Float = 1f
         private set
 
-    /** Extra brightness 0..1 added after [AtmosphereEvent.SUCCESS] (driven by [AdsrEnvelope]). */
+    /** Updraft strength 0..1 after [AtmosphereEvent.SUCCESS] (driven by [AdsrEnvelope]); never affects colors. */
     var glow: Float = 0f
+        private set
+
+    /** Dimming 0..1 after [AtmosphereEvent.FAILURE]; body alpha drops by up to [FAILURE_ALPHA_DIM]. */
+    var failureGlow: Float = 0f
         private set
 
     private val speedEnvelope = AdsrEnvelope(
@@ -88,7 +98,18 @@ class SakuraEffect : AtmosphereEffect {
         releaseSeconds = 2.0f
     )
 
+    // Updraft: quick lift, then eases back to the normal fall over ~1.8 s in total.
     private val glowEnvelope = AdsrEnvelope(
+        restLevel = 0f,
+        attackSeconds = 0.2f,
+        decaySeconds = 1.6f,
+        sustainRatio = 0f,
+        releaseSeconds = 0f,
+        oneShot = true,
+    )
+
+    // Gust: brief dimming that also scopes the direction lock of the running gust.
+    private val failureEnvelope = AdsrEnvelope(
         restLevel = 0f,
         attackSeconds = 0.2f,
         decaySeconds = 2.0f,
@@ -111,10 +132,15 @@ class SakuraEffect : AtmosphereEffect {
         lastHeight = -1
         speedMultiplier = speedScale
         glow = 0f
+        failureGlow = 0f
+        gustDirection = 0f
+        cursorAvoidance.clear()
         speedEnvelope.release()
         speedEnvelope.advance(100f)
         glowEnvelope.release()
         glowEnvelope.advance(100f)
+        failureEnvelope.release()
+        failureEnvelope.advance(100f)
         started = true
     }
 
@@ -123,6 +149,14 @@ class SakuraEffect : AtmosphereEffect {
         particleCount = 0
         lastWidth = -1
         lastHeight = -1
+        cursorAvoidance.clear()
+        glowEnvelope.release()
+        glowEnvelope.advance(100f)
+        failureEnvelope.release()
+        failureEnvelope.advance(100f)
+        glow = 0f
+        failureGlow = 0f
+        gustDirection = 0f
     }
 
     override fun onPaletteChanged(palette: AtmospherePalette) {
@@ -142,10 +176,8 @@ class SakuraEffect : AtmosphereEffect {
         speedMultiplier = speedEnvelope.value * speedScale
     }
 
-    override fun onReactionProfileChanged(profile: AtmosphereReactionProfile) {
-        val normalized = profile.normalized(AtmosphereReactionProfile.sakura())
-        speedEnvelope.configure(normalized.movement)
-        glowEnvelope.configure(normalized.successPulse)
+    override fun onPointerChanged(x: Float, y: Float, inside: Boolean) {
+        cursorAvoidance.setPointer(x, y, inside)
     }
 
     override fun onEvent(event: AtmosphereEvent) {
@@ -154,8 +186,18 @@ class SakuraEffect : AtmosphereEffect {
             AtmosphereEvent.USER_ACTIVE -> speedEnvelope.release()
             AtmosphereEvent.ACTIVITY_STARTED -> speedEnvelope.trigger(ACTIVITY_SPEED)
             AtmosphereEvent.ACTIVITY_FINISHED -> speedEnvelope.release()
-            AtmosphereEvent.SUCCESS -> glowEnvelope.trigger(1f)
-            AtmosphereEvent.FAILURE -> gust()
+            AtmosphereEvent.SUCCESS -> {
+                // A joyful updraft cancels any running gust dimming; the horizontal impulse keeps damping naturally.
+                glowEnvelope.trigger(1f)
+                failureEnvelope.release()
+                failureEnvelope.advance(100f)
+            }
+            AtmosphereEvent.FAILURE -> {
+                failureEnvelope.trigger(1f)
+                glowEnvelope.release()
+                glowEnvelope.advance(100f)
+                if (started) gust()
+            }
         }
     }
 
@@ -174,7 +216,12 @@ class SakuraEffect : AtmosphereEffect {
 
         speedMultiplier = speedEnvelope.advance(deltaSeconds) * speedScale
         glow = glowEnvelope.advance(deltaSeconds)
-        val glowBoost = 1f + glow * GLOW_ALPHA_BOOST
+        failureGlow = failureEnvelope.advance(deltaSeconds)
+        if (failureEnvelope.phase == AdsrEnvelope.Phase.IDLE) gustDirection = 0f
+        // Joyful updraft: the success envelope lifts every petal against its fall and quickens the flutter.
+        val lift = glow * LIFT_SPEED * uiScale
+        val flutter = 1f + glow * LIFT_FLUTTER_BOOST
+        val failureDim = 1f - failureGlow * FAILURE_ALPHA_DIM
         val opacityScale = palette.opacityScale
 
         for (i in 0 until particleCount) {
@@ -183,28 +230,29 @@ class SakuraEffect : AtmosphereEffect {
             if (life[i] >= maxLife[i] || y[i] > by + bh + size[i] * BOUNDING_RADIUS_FACTOR ||
                 x[i] < bx - EDGE_MARGIN * uiScale || x[i] > bx + bw + EDGE_MARGIN * uiScale) {
                 val padding = boundingRadius(i) + 1f
-                spawn(i, bx, by, bw, bh)
+                spawn(i, bx, by, bw)
                 changed = emitVanish(dirty, i, padding) or changed
                 continue
             }
 
             // Motion
-            swayPhase[i] += swayRate[i] * deltaSeconds * speedMultiplier
+            swayPhase[i] += swayRate[i] * deltaSeconds * speedMultiplier * flutter
             val sway = sin(swayPhase[i]) * SWAY_AMPLITUDE * uiScale * speedMultiplier
             
             // Damping of gust impulse back to baseline drift
             val damp = min(1f, deltaSeconds * GUST_DAMPING)
             vx[i] += (0f - vx[i]) * damp
 
-            x[i] += (vx[i] + sway) * deltaSeconds
-            y[i] += fallSpeed[i] * speedMultiplier * deltaSeconds
-            rotation[i] += angularVelocity[i] * speedMultiplier * deltaSeconds
+            cursorAvoidance.advance(i, x[i], y[i], deltaSeconds, uiScale)
+            x[i] += (vx[i] + sway + cursorAvoidance.velocityX(i)) * deltaSeconds
+            y[i] += (fallSpeed[i] * speedMultiplier - lift + cursorAvoidance.velocityY(i)) * deltaSeconds
+            rotation[i] += angularVelocity[i] * speedMultiplier * flutter * deltaSeconds
 
             // Visuals
             phase[i] += pulseRate[i] * deltaSeconds
             val pulse = 0.9f + 0.1f * sin(phase[i])
             val envelope = lifeEnvelope(life[i], maxLife[i])
-            alpha[i] = min(1f, baseAlpha[i] * intensity * pulse * envelope * opacityScale * glowBoost)
+            alpha[i] = min(1f, baseAlpha[i] * intensity * pulse * envelope * opacityScale) * failureDim
 
             // Dirty reporting
             val moved = abs(x[i] - prevX[i]) >= MOVE_EPSILON || abs(y[i] - prevY[i]) >= MOVE_EPSILON
@@ -236,7 +284,7 @@ class SakuraEffect : AtmosphereEffect {
             val py = prevY[i]
             val pr = prevRotation[i]
             val s = size[i]
-            val br = s * BOUNDING_RADIUS_FACTOR
+            val br = boundingRadius(i)
 
             if (px + br < cx0 || px - br > cx1 || py + br < cy0 || py - br > cy1) continue
 
@@ -294,13 +342,14 @@ class SakuraEffect : AtmosphereEffect {
     }
 
     private fun spawnInitial(i: Int, bx: Float, by: Float, bw: Float, bh: Float) {
-        spawn(i, bx, by, bw, bh)
+        spawn(i, bx, by, bw)
         // For initial spawn, distribute life and y position
         life[i] = random.nextFloat() * maxLife[i]
         y[i] = by + random.nextFloat() * bh
     }
 
-    private fun spawn(i: Int, bx: Float, by: Float, bw: Float, bh: Float) {
+    private fun spawn(i: Int, bx: Float, by: Float, bw: Float) {
+        cursorAvoidance.reset(i)
         x[i] = bx + random.nextFloat() * bw
         y[i] = by - EDGE_MARGIN * uiScale // Spawn above top
         vx[i] = (random.nextFloat() * 2f - 1f) * 5f * uiScale // Small initial horizontal drift
@@ -320,9 +369,11 @@ class SakuraEffect : AtmosphereEffect {
 
     private fun gust() {
         val impulse = (GUST_IMPULSE_MIN + random.nextFloat() * (GUST_IMPULSE_MAX - GUST_IMPULSE_MIN)) * uiScale
-        val direction = if (random.nextBoolean()) 1f else -1f
+        // The direction is chosen once per gust and reused until the failure envelope settles, so back-to-back
+        // failures pile up in the same direction instead of cancelling each other.
+        if (gustDirection == 0f) gustDirection = if (random.nextBoolean()) 1f else -1f
         for (i in 0 until particleCount) {
-            vx[i] += direction * impulse * (0.8f + random.nextFloat() * 0.4f)
+            vx[i] += gustDirection * impulse * (0.8f + random.nextFloat() * 0.4f)
         }
     }
 
@@ -390,6 +441,10 @@ class SakuraEffect : AtmosphereEffect {
     @TestOnly
     fun colorTableSizeForTest(): Int = colors.count { it != null }
 
+    /** Horizontal direction of the running gust: `1` right, `-1` left, `0` when no gust is active. */
+    @TestOnly
+    fun gustDirectionForTest(): Float = gustDirection
+
     companion object {
         const val ID: String = "sakura"
 
@@ -421,7 +476,15 @@ class SakuraEffect : AtmosphereEffect {
         const val GUST_DAMPING: Float = 0.8f
         const val GUST_IMPULSE_MIN: Float = 40f
         const val GUST_IMPULSE_MAX: Float = 80f
-        const val GLOW_ALPHA_BOOST: Float = 0.4f
+
+        /** Peak upward speed (user px/s, scaled by `uiScale`) of the success updraft at `glow == 1`. */
+        const val LIFT_SPEED: Float = 35f
+
+        /** Extra tumble/sway rate at `glow == 1` (`1 + LIFT_FLUTTER_BOOST` times the normal rate). */
+        const val LIFT_FLUTTER_BOOST: Float = 0.5f
+
+        /** Fraction of body alpha removed at `failureGlow == 1`. */
+        const val FAILURE_ALPHA_DIM: Float = 0.25f
 
         private const val TWO_PI = (Math.PI * 2).toFloat()
         private const val EDGE_MARGIN = 20f

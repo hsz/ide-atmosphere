@@ -61,6 +61,51 @@ class AtmosphereManagerTest : BasePlatformTestCase() {
 
     private fun attachFirst() = manager.attach(project, first.rootPane, first.parent, first.effect)
 
+    fun `test cursor avoidance applies immediately independently of activity gating`() {
+        val state = AtmosphereSettingsState.getInstance().state
+        state.reactToActivity = false
+        state.avoidMouse = false
+        attachFirst()
+        val atmosphere = manager.atmosphereFor(project)!!
+        assertFalse(atmosphere.cursorAvoidanceEnabled)
+        assertFalse(atmosphere.isPointerTracking)
+        state.avoidMouse = true
+        manager.applySettings()
+        assertTrue(atmosphere.cursorAvoidanceEnabled)
+        assertTrue(atmosphere.isPointerTracking)
+        state.avoidMouse = false
+        manager.applySettings()
+        assertFalse(atmosphere.isPointerTracking)
+    }
+
+    fun `test explicit outcome previews ignore activity gating and only play outcomes`() {
+        attachFirst()
+        val settings = AtmosphereSettingsState.getInstance()
+        settings.state.reactToActivity = false
+        val saved = settings.state.deepCopy()
+        manager.previewOutcome(AtmosphereEvent.SUCCESS)
+        manager.previewOutcome(AtmosphereEvent.FAILURE)
+        manager.previewOutcome(AtmosphereEvent.ACTIVITY_STARTED)
+        assertEquals(listOf(AtmosphereEvent.SUCCESS, AtmosphereEvent.FAILURE), first.effect.events)
+        assertEquals(saved, settings.state)
+        // Previews never touch the activity counters: a following real completion is still a plain outcome.
+        settings.state.reactToActivity = true
+        manager.endActivity(project, success = true)
+        assertEquals(listOf(AtmosphereEvent.SUCCESS, AtmosphereEvent.FAILURE, AtmosphereEvent.SUCCESS), first.effect.events)
+        manager.isEnabled = false
+        manager.previewOutcome(AtmosphereEvent.SUCCESS)
+        assertEquals(3, first.effect.events.size)
+        assertFalse(manager.isEnabled)
+    }
+
+    fun `test focus loss clears the cursor even when focus fading is disabled`() {
+        attachFirst()
+        AtmosphereSettingsState.getInstance().state.pauseOnFocusLoss = false
+        first.effect.onPointerChanged(100f, 100f, true)
+        manager.setApplicationActive(false)
+        assertFalse(first.effect.pointerInside)
+    }
+
     fun `test enabled by default and attach starts the ticker and shows the glass pane`() {
         assertTrue(manager.isEnabled)
         assertFalse(manager.ticker.isRunning)
@@ -417,20 +462,19 @@ class AtmosphereManagerTest : BasePlatformTestCase() {
         assertEquals(1.5f, first.effect.lastSpeedScale)
     }
 
-    fun `test profiles reach every frame on attach and apply without restarting`() {
-        val state = AtmosphereSettingsState.getInstance().state
-        state.reactionProfile().movement.attackSeconds = 2f
+    fun `test applySettings reaches every frame without restarting the effects`() {
         attachFirst()
-        assertEquals(state.reactionProfile(), first.effect.lastReactionProfile)
-
         val otherProject = MockProject(null, testRootDisposable)
         try {
             manager.attach(otherProject, second.rootPane, second.parent, second.effect)
-            assertEquals(state.reactionProfile(), second.effect.lastReactionProfile)
-            state.reactionProfile().successPulse.sustainRatio = 0.5f
+            val state = AtmosphereSettingsState.getInstance().state
+            state.intensity = 1.7f
+            state.speed = 0.4f
             manager.applySettings()
-            assertEquals(state.reactionProfile(), first.effect.lastReactionProfile)
-            assertEquals(state.reactionProfile(), second.effect.lastReactionProfile)
+            assertEquals(1.7f, first.effect.lastIntensity)
+            assertEquals(1.7f, second.effect.lastIntensity)
+            assertEquals(0.4f, first.effect.lastSpeedScale)
+            assertEquals(0.4f, second.effect.lastSpeedScale)
             assertEquals(1, first.effect.startCount)
             assertEquals(1, second.effect.startCount)
         } finally {
@@ -438,30 +482,23 @@ class AtmosphereManagerTest : BasePlatformTestCase() {
         }
     }
 
-    fun `test theme replacement uses the same shared profile`() {
-        val state = AtmosphereSettingsState.getInstance().state
-        state.reactionProfile().movement.attackSeconds = 0f
-        state.reactionProfile().movement.decaySeconds = 0f
-        state.reactionProfile().movement.sustainRatio = 0.5f
-        val profile = state.reactionProfile().deepCopy()
+    fun `test theme replacement creates a real effect that reacts to activity`() {
         attachFirst()
-        assertEquals(profile, first.effect.lastReactionProfile)
+        val state = AtmosphereSettingsState.getInstance().state
         state.effectId = "sakura"
         manager.applySettings()
 
         val effect = manager.atmosphereFor(project)!!.effect as SakuraEffect
         effect.onEvent(AtmosphereEvent.ACTIVITY_STARTED)
-        effect.update(0.01f, Rectangle(0, 0, 800, 600), DirtyRegionCollector(100))
-        assertEquals(1.3f, effect.speedMultiplier, 0.001f)
-        assertEquals(profile, state.reactionProfile())
+        effect.update(5f, Rectangle(0, 0, 800, 600), DirtyRegionCollector(100))
+        assertTrue(effect.speedMultiplier > 1f)
 
         state.effectId = "fireflies"
         manager.applySettings()
         val fireflies = manager.atmosphereFor(project)!!.effect as FirefliesEffect
         fireflies.onEvent(AtmosphereEvent.ACTIVITY_STARTED)
-        fireflies.update(0.01f, Rectangle(0, 0, 800, 600), DirtyRegionCollector(100))
-        assertEquals(1f + (FirefliesEffect.ACTIVITY_SPEED - 1f) * 0.5f, fireflies.speedMultiplier, 0.001f)
-        assertEquals(profile, state.reactionProfile())
+        fireflies.update(5f, Rectangle(0, 0, 800, 600), DirtyRegionCollector(100))
+        assertEquals(FirefliesEffect.ACTIVITY_SPEED, fireflies.speedMultiplier, 0.001f)
     }
 
     fun `test reactToActivity=false stops the idle producer`() {

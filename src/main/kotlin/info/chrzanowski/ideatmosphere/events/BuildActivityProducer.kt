@@ -30,7 +30,8 @@ class BuildActivityProducer(private val project: Project) : ProjectTaskListener 
 
     internal fun onTerminated(isAborted: Boolean, hasErrors: Boolean) {
         ApplicationManager.getApplication().invokeLater {
-            AtmosphereManager.getInstance().endActivity(project, success = !isAborted && !hasErrors)
+            val manager = AtmosphereManager.getInstance()
+            if (isAborted) manager.endActivity(project) else manager.endActivity(project, success = !hasErrors)
         }
     }
 }

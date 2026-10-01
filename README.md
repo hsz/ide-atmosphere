@@ -5,27 +5,35 @@
 
 ## Overview
 
-IDE Atmosphere is an IntelliJ Platform plugin that paints a subtle, animated *fireflies* particle field across the
-whole project frame (editor, tool windows, header and status bar) without ever touching input, editor content, PSI or
-languages. The overlay is a `Painter` on the frame's existing `IdeGlassPaneImpl`; see
-[docs/overlay-investigation.md](./docs/overlay-investigation.md) for the platform investigation behind that choice.
+IDE Atmosphere is an IntelliJ Platform plugin that paints a quiet, living layer across the whole project frame (editor,
+tool windows, header and status bar): **Fireflies** on a summer night, **Sakura** petals in a spring breeze or softly
+falling **Snow**. It never intercepts input and never changes editor content, PSI or languages. The overlay is a
+`Painter` on the frame's existing `IdeGlassPaneImpl`; see [docs/overlay-investigation.md](./docs/overlay-investigation.md)
+for the platform investigation behind that choice.
 
 ## What it does
 
-- **Fireflies on every project window.** 20–50 slow, low-opacity, gently pulsing particles drift over the whole
-  `IdeFrame` — editor, tool windows, empty editor area, toolbar/header band and status bar. The count scales with
-  the window area and the field is rebuilt on resize.
-- **Never in the way.** The overlay is a `Painter` on the frame's existing `IdeGlassPaneImpl`: it has no AWT
-  listeners, is not enabled as an input target and never changes the cursor. Popups, completion, Search Everywhere,
+- **Three atmospheres on every project window.** Wandering, breathing fireflies; drifting, tumbling Sakura petals;
+  or layered snowflakes with depth (near ones larger, brighter and faster). Each covers the whole `IdeFrame` — editor,
+  tool windows, empty editor area, toolbar/header band and status bar. The count scales with the window area and the
+  field is rebuilt on resize.
+- **Never in the way.** The overlay is a `Painter` on the frame's existing `IdeGlassPaneImpl`: passive cursor
+  observation never consumes mouse events, enables an input target or changes the cursor. Popups, completion, Search Everywhere,
   dialogs and floating tool windows are separate windows, so particles always stay behind them.
 - **Theme aware.** Palette derived from the current LaF (`JBColor.isBright()` + panel background luminance) and
-  refreshed on theme change: warm amber on dark themes, deeper amber on light ones.
+  refreshed on theme change: every atmosphere has a dark and a light variant (warm amber / deep amber fireflies,
+  soft pink petals, white / blue-grey snow).
 - **Smooth.** Fireflies are rendered at sub-pixel positions (float geometry, antialiasing, `STROKE_PURE`) at a
   governed 20–30 FPS with real `deltaTime`, so they glide instead of hopping between pixels.
-- **Reacts to the IDE.** A generic `AtmosphereEvent` seam (`ACTIVITY_STARTED/FINISHED`, `SUCCESS`, `FAILURE`,
-  `USER_ACTIVE`, `USER_IDLE`); the PoC wires one producer — after 30 s without input (`IdleTracker`) the fireflies
-  calm down to half speed and the animation drops to 15 FPS (same pixels per frame); the first user event restores
-  normal motion.
+- **Runs away from the cursor.** Particles within 180 px of the pointer accelerate smoothly away from it (up to
+  260 px/s right under the cursor) and glide back into their own motion once it has moved on. This has its own
+  toggle, independent of activity reactions.
+- **Reacts to the IDE — with motion, never with colour.** Indexing, project builds, Run/Debug processes and external
+  project sync/tasks (including Gradle) speed the particles up while they run. A success makes the whole field rise
+  for a moment (fireflies lift and brighten, petals and snow ride an updraft); a failure scatters the fireflies or
+  sends one gust through the petals and flakes while everything dims briefly. Cancelled external tasks and aborted
+  builds finish neutrally, and a Gradle run is reported exactly once. After 30 s without input (`IdleTracker`)
+  particles slow down and animation drops to 15 FPS; input restores normal motion.
 - **Cheap when unattended.** One small repaint rectangle per moved firefly, all painted in a single back-buffer
   flush (never a whole-window repaint during animation); an adaptive governor keeps the tick cost under ≈ 10 % of
   one core by lowering the rate to 20 FPS first. When the IDE application is deactivated the atmosphere fades out
@@ -39,15 +47,18 @@ languages. The overlay is a `Painter` on the frame's existing `IdeGlassPaneImpl`
 
 ### Settings
 
-Open `Settings | Appearance & Behavior | Atmosphere` to choose Fireflies or Sakura, adjust intensity and speed
-(`0.3–2.0`), and control activity reactions and focus-loss fading. Intensity updates existing particle opacity and
-population on the next animation tick without requiring a resize; speed scales normal, idle and busy motion.
+`Settings | Appearance & Behavior | Atmosphere` is deliberately small:
 
-Each theme has independent movement and success-pulse ADSR profiles: attack, decay and release durations
-(`0–10` seconds), and sustain ratio (`0–1`). Movement sustain is relative to normal motion; success pulses always
-return to zero after decay and release. Profile edits take effect without restarting the current theme's effect.
-Changes remain drafts until Apply; Reset reloads saved values, and Cancel discards unapplied edits.
-Both themes' profiles are persisted in `ide-atmosphere.xml`, even when the other theme is selected.
+- **Atmosphere** — Fireflies, Sakura or Snow, with a one-line description of the selected one.
+- **Intensity** (Subtle … Vivid) and **Speed** (Calm … Lively) sliders. Intensity changes opacity and population on
+  the next animation tick without a resize; speed scales normal, idle and busy motion alike.
+- **React to IDE activity**, with **Preview success** / **Preview failure** buttons that play the reactions on the
+  open windows right away (they work even while automatic reactions are off and never save anything).
+- **Keep particles away from the mouse pointer** and **Pause when the IDE window is in the background**.
+
+Reaction timings are built into each atmosphere and tuned to feel natural; there is nothing to configure there.
+Changes stay drafts until Apply, Reset reloads the saved values and Cancel discards them. Everything is persisted in
+`ide-atmosphere.xml`.
 
 ### Debug statistics
 
@@ -80,11 +91,11 @@ ToggleAtmosphereAction ──isEnabled──▶  │
 
 | Package | Contents |
 |---|---|
-| `core` | `AtmosphereEffect`, `AtmosphereEvent`, `AtmospherePalette`, `EffectContext` — effect-agnostic, Swing-only contracts |
+| `core` | `AtmosphereEffect`, `AtmosphereEvent`, `AtmospherePalette`, `EffectContext`, `AdsrEnvelope` (smooth reaction envelopes), `CursorAvoidance` (shared pointer steering) — effect-agnostic, Swing-only contracts |
 | `render` | `AtmospherePainter` (glass-pane painter with fade opacity and the one-shot nested-paint hook), `DirtyRegionCollector` (cost-model region merging), `FrameBudgetGovernor` (adaptive 20–30 FPS), `AtmosphereTicker` (shared Swing timer, calm mode, dormant notification), `AtmosphereStats` |
 | `frame` | `FrameAtmosphere` — one effect on one root pane, nested batch repaint routing, fade-out/fade-in and dormancy |
-| `effects` | `AtmosphereEffects` registry, `fireflies/FirefliesEffect` (structure-of-arrays, allocation-free hot path) |
-| `project`, `listeners`, `events`, `actions` | Lifecycle wiring, platform listeners, `IdleActivityProducer`, `ToggleAtmosphereAction` |
+| `effects` | `AtmosphereEffects` registry, `fireflies/FirefliesEffect`, `sakura/SakuraEffect`, `snow/SnowEffect` (structure-of-arrays, allocation-free hot path) |
+| `project`, `listeners`, `events`, `actions` | Lifecycle wiring, platform listeners, idle, build, execution, indexing and external-system activity producers, `ToggleAtmosphereAction` |
 
 Adding another atmosphere means implementing `AtmosphereEffect` and registering it in `AtmosphereEffects`; adding an
 IDE integration means publishing `AtmosphereEvent`s through `AtmosphereManager.publish`. Neither touches the painter,
@@ -93,7 +104,8 @@ the ticker or the lifecycle code.
 ## Limitations (proof of concept)
 
 - No atmosphere on floating tool windows, detached editor windows, the Welcome screen, dialogs or popups.
-- No dedicated Reduce Motion setting; activity integration does not observe every Gradle/Maven invocation.
+- No dedicated Reduce Motion setting; activity integration does not observe arbitrary background actions or terminal
+  commands. External-system notifications cover Gradle sync/tasks; Maven-specific sync is not verified.
 - While the overlay is visible, ordinary IDE repaints pay a ≈ 5–10 % overhead (the same as IDE background images).
 - CPU cost (1512×949 @2x, 24 fireflies): ≈ 8–11 % of one core while the user is active at 20–24 FPS (smoothness was
   deliberately prioritised over the original 3 % target), ≈ 6 % while the user is idle (15 FPS, half speed), 0 %
@@ -107,7 +119,7 @@ the ticker or the lifecycle code.
 
 | Command | Purpose |
 |---|---|
-| `./gradlew test` | Unit tests (collector, governor, fireflies, idle producer) and platform tests (`BasePlatformTestCase`) |
+| `./gradlew test` | Unit tests (collector, governor, effects, envelopes, producers) and platform tests (`BasePlatformTestCase`) |
 | `./gradlew runIde` | Sandbox IDE with the plugin and debug statistics enabled |
 | `./gradlew verifyPlugin` | Plugin Verifier against the configured IDE versions |
 | `./gradlew build` | Compile, test and package |
