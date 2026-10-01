@@ -35,6 +35,7 @@
 
 ### Fixed
 
+- The success reaction was barely noticeable. The updraft is now about three times stronger (fireflies lift 70–120 px/s and brighten up to 2.5×, petals and snow rise at up to 100 / 90 px/s with a wider sway and flutter), still motion-only for petals and snow.
 - Particles fleeing the cursor left a fading "after shadow": at up to 260 px/s they jumped 10+ px per frame at the 20–30 FPS animation rate. The escape speed cap is now 120 px/s (with a proportionally gentler acceleration), so each frame moves only a few pixels. Dirty-region coverage during avoidance is now covered by a regression test for all atmospheres.
 
 - A Gradle run configuration was reported by both the Run/Debug listener and the external-system listener, producing two outcomes per run (and, for Sakura, two opposing gusts that could cancel each other). External-system process handlers are now left to the external-system producer, and a gust keeps one direction while it is active.

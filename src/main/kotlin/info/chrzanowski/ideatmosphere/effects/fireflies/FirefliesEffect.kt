@@ -512,7 +512,7 @@ class FirefliesEffect : AtmosphereEffect {
         private const val HALO_ALPHA_RATIO = 0.18f
         private const val MIN_BASE_ALPHA = 0.18f
         private const val MAX_BASE_ALPHA = 0.35f
-        private const val GLOW_ALPHA_BOOST = 0.6f
+        private const val GLOW_ALPHA_BOOST = 1.5f
         private const val FAILURE_DIM = 0.3f
         private const val EDGE_MARGIN = 40f
         private const val WANDER_TURN_RATE = 1.2f
@@ -521,9 +521,9 @@ class FirefliesEffect : AtmosphereEffect {
         private const val IMPULSE_DAMPING = 1.2f
         private const val SCATTER_IMPULSE_MIN = 30f
         private const val SCATTER_IMPULSE_MAX = 60f
-        private const val LIFT_IMPULSE_MIN = 25f
-        private const val LIFT_IMPULSE_MAX = 45f
-        private const val LIFT_SPREAD = 10f
+        private const val LIFT_IMPULSE_MIN = 70f
+        private const val LIFT_IMPULSE_MAX = 120f
+        private const val LIFT_SPREAD = 40f
         @Suppress("UseJBColor")
         private val TRANSPARENT = Color(0, 0, 0, 0)
 

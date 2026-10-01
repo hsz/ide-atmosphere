@@ -517,8 +517,8 @@ class SnowEffect : AtmosphereEffect {
         const val ACTIVITY_SPEED: Float = 1.4f
 
         /** Success updraft: peak lift in px/s (× uiScale), sway widening at the peak and envelope timings. */
-        const val UPDRAFT_SPEED: Float = 30f
-        const val UPDRAFT_SWAY_BOOST: Float = 1f
+        const val UPDRAFT_SPEED: Float = 90f
+        const val UPDRAFT_SWAY_BOOST: Float = 2f
         const val UPDRAFT_ATTACK_SECONDS: Float = 0.3f
         const val UPDRAFT_DECAY_SECONDS: Float = 1.5f
 

@@ -478,10 +478,10 @@ class SakuraEffect : AtmosphereEffect {
         const val GUST_IMPULSE_MAX: Float = 80f
 
         /** Peak upward speed (user px/s, scaled by `uiScale`) of the success updraft at `glow == 1`. */
-        const val LIFT_SPEED: Float = 35f
+        const val LIFT_SPEED: Float = 100f
 
         /** Extra tumble/sway rate at `glow == 1` (`1 + LIFT_FLUTTER_BOOST` times the normal rate). */
-        const val LIFT_FLUTTER_BOOST: Float = 0.5f
+        const val LIFT_FLUTTER_BOOST: Float = 1.0f
 
         /** Fraction of body alpha removed at `failureGlow == 1`. */
         const val FAILURE_ALPHA_DIM: Float = 0.25f
