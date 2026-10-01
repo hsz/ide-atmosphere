@@ -27,6 +27,12 @@ object AtmosphereEffects {
     /** Ids of all registered effects, in registration order. */
     val ids: Set<String> get() = factories.keys
 
+    /** Everything a user may pick: the registered effects. */
+    val selectableIds: List<String> get() = factories.keys.toList()
+
+    /** `true` for a registered effect id. */
+    fun isSelectable(id: String?): Boolean = id != null && id in factories
+
     /** Creates a fresh instance of the effect with the given [id], or `null` if it is unknown. */
     fun create(id: String): AtmosphereEffect? = factories[id]?.invoke()
 

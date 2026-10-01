@@ -28,6 +28,8 @@ class AtmosphereSettingsState : PersistentStateComponent<AtmosphereSettingsState
         var darkEffectId: String? = null,
         /** Effect used on light themes instead of [effectId]; `null` means "same as [effectId]". */
         var lightEffectId: String? = null,
+        /** The editor caret gently gathers nearby particles; off in [PointerMode.OFF] and under [reduceMotion]. */
+        var caretAnchor: Boolean = false,
     ) {
         /**
          * Migration shim for the `avoidMouse` option of 1.x settings files: `false` becomes [PointerMode.OFF], `true`
@@ -49,14 +51,16 @@ class AtmosphereSettingsState : PersistentStateComponent<AtmosphereSettingsState
          * [effectId]") and clamps intensity and speed into [SCALE_RANGE].
          */
         fun normalized(): State = copy(
-            effectId = effectId.takeIf { it in AtmosphereEffects.ids } ?: AtmosphereEffects.DEFAULT_ID,
+            effectId = effectId.takeIf(AtmosphereEffects::isSelectable) ?: AtmosphereEffects.DEFAULT_ID,
             intensity = intensity.takeIf { it.isFinite() }?.coerceIn(SCALE_RANGE) ?: 1f,
             speed = speed.takeIf { it.isFinite() }?.coerceIn(SCALE_RANGE) ?: 1f,
-            darkEffectId = darkEffectId?.takeIf { it in AtmosphereEffects.ids },
-            lightEffectId = lightEffectId?.takeIf { it in AtmosphereEffects.ids },
+            darkEffectId = darkEffectId?.takeIf(AtmosphereEffects::isSelectable),
+            lightEffectId = lightEffectId?.takeIf(AtmosphereEffects::isSelectable),
         )
 
-        /** The effect to show on a dark or light theme: the per-theme preset when set, [effectId] otherwise. */
+        /**
+         * The effect to show on a dark or light theme: the per-theme effect when set, [effectId] otherwise.
+         */
         fun effectIdFor(isDark: Boolean): String = (if (isDark) darkEffectId else lightEffectId) ?: effectId
 
         /**

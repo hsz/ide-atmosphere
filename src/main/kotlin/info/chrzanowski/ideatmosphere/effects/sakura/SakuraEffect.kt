@@ -202,6 +202,15 @@ class SakuraEffect : AtmosphereEffect {
         cursorAvoidance.burst(x, y, uiScale, particleCount, this.x, this.y)
     }
 
+    override fun onScroll(x: Float, y: Float, amount: Float) {
+        // The gust follows the content: scrolling down moves the text up, and the petals with it.
+        cursorAvoidance.gust(x, y, 0f, if (amount > 0f) -1f else 1f, abs(amount), uiScale, particleCount, this.x, this.y)
+    }
+
+    override fun setAnchor(x: Float, y: Float, active: Boolean) {
+        cursorAvoidance.setAnchor(x, y, active)
+    }
+
     override fun setPointerMode(mode: PointerMode) {
         cursorAvoidance.mode = mode
     }

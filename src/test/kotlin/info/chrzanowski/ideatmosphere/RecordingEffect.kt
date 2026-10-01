@@ -39,6 +39,15 @@ open class RecordingEffect(override val id: String = "recording") : AtmosphereEf
     /** Root-pane coordinates of every observed mouse press, as (x, y) pairs. */
     val presses = ArrayList<Pair<Float, Float>>()
 
+    /** Every observed scroll gust as (x, y, amount). */
+    val scrolls = ArrayList<Triple<Float, Float, Float>>()
+
+    /** Last anchor received through [setAnchor] as (x, y, active), or `null` before the first call. */
+    var anchor: Triple<Float, Float, Boolean>? = null
+
+    /** Every anchor received, in order. */
+    val anchors = ArrayList<Triple<Float, Float, Boolean>>()
+
     /** Regions (x, y, w, h) reported on each update; empty list → update returns `false`. */
     val regions = ArrayList<FloatArray>()
 
@@ -81,6 +90,15 @@ open class RecordingEffect(override val id: String = "recording") : AtmosphereEf
 
     override fun onPointerPressed(x: Float, y: Float) {
         presses.add(x to y)
+    }
+
+    override fun onScroll(x: Float, y: Float, amount: Float) {
+        scrolls.add(Triple(x, y, amount))
+    }
+
+    override fun setAnchor(x: Float, y: Float, active: Boolean) {
+        anchor = Triple(x, y, active)
+        anchors.add(Triple(x, y, active))
     }
 
     override fun setPointerMode(mode: PointerMode) {

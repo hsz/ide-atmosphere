@@ -15,8 +15,9 @@ import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
 import info.chrzanowski.ideatmosphere.settings.AtmosphereSettingsConfigurable
 
 /**
- * The actions behind the status bar widget's popup: one radio-like entry per effect, "Pause for 1 Hour" (or "Resume"
- * while snoozed) and "Open Atmosphere Settings…". Everything delegates to [AtmosphereManager].
+ * The actions behind the status bar widget's popup: one radio-like entry per selectable effect,
+ * "Pause for 1 Hour" (or "Resume" while snoozed) and "Open Atmosphere Settings…". Everything
+ * delegates to [AtmosphereManager].
  */
 object AtmosphereWidgetActions {
 
@@ -27,7 +28,7 @@ object AtmosphereWidgetActions {
         openSettings: () -> Unit = { ShowSettingsUtil.getInstance().showSettingsDialog(project, AtmosphereSettingsConfigurable::class.java) },
     ): DefaultActionGroup {
         val group = DefaultActionGroup()
-        for (id in AtmosphereEffects.ids) group.add(SelectEffectAction(id, manager))
+        for (id in AtmosphereEffects.selectableIds) group.add(SelectEffectAction(id, manager))
         group.add(Separator.getInstance())
         group.add(SnoozeAction(manager))
         group.add(OpenSettingsAction(openSettings))

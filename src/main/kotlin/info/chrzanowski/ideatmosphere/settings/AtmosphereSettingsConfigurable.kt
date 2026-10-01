@@ -60,7 +60,7 @@ class AtmosphereSettingsConfigurable internal constructor(
                     .applyToComponent { name = "enabled" }
             }.bottomGap(BottomGap.SMALL)
             row(AtmosphereBundle.message("settings.effect")) {
-                comboBox(AtmosphereEffects.ids.toList(), textListCellRenderer { id -> id?.let(::effectName) })
+                comboBox(AtmosphereEffects.selectableIds, textListCellRenderer { id -> id?.let(::effectName) })
                     .bindItem({ currentDraft().effectId }, { currentDraft().effectId = it ?: AtmosphereEffects.DEFAULT_ID })
                     .applyToComponent {
                         name = "effectId"
@@ -118,6 +118,12 @@ class AtmosphereSettingsConfigurable internal constructor(
                         .comment(AtmosphereBundle.message("settings.pointerMode.comment"))
                 }
                 row {
+                    checkBox(AtmosphereBundle.message("settings.caretAnchor"))
+                        .bindSelected({ currentDraft().caretAnchor }, { currentDraft().caretAnchor = it })
+                        .applyToComponent { name = "caretAnchor" }
+                        .comment(AtmosphereBundle.message("settings.caretAnchor.comment"))
+                }
+                row {
                     checkBox(AtmosphereBundle.message("settings.pauseOnFocusLoss"))
                         .bindSelected({ currentDraft().pauseOnFocusLoss }, { currentDraft().pauseOnFocusLoss = it })
                         .applyToComponent { name = "pauseOnFocusLoss" }
@@ -160,10 +166,10 @@ class AtmosphereSettingsConfigurable internal constructor(
             paintTicks = false
         }
 
-    /** Combo of "same as the atmosphere above" (`null`) followed by every registered effect. */
+    /** Combo of "same as the atmosphere above" (`null`) followed by every selectable effect. */
     private fun Row.presetCombo(id: String, read: () -> String?, write: (String?) -> Unit): Cell<ComboBox<String?>> =
         comboBox(
-            listOf<String?>(null) + AtmosphereEffects.ids,
+            listOf<String?>(null) + AtmosphereEffects.selectableIds,
             textListCellRenderer { effectId ->
                 if (effectId == null) AtmosphereBundle.message("settings.preset.same") else effectName(effectId)
             },

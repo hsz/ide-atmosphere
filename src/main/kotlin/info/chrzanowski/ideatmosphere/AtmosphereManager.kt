@@ -19,6 +19,7 @@ import info.chrzanowski.ideatmosphere.core.AtmospherePalette
 import info.chrzanowski.ideatmosphere.core.EffectContext
 import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
 import info.chrzanowski.ideatmosphere.effects.fireflies.FirefliesEffect
+import info.chrzanowski.ideatmosphere.events.CaretAnchorProducer
 import info.chrzanowski.ideatmosphere.events.IdleActivityProducer
 import info.chrzanowski.ideatmosphere.events.TypingRhythmProducer
 import info.chrzanowski.ideatmosphere.frame.FrameAtmosphere
@@ -42,7 +43,8 @@ import kotlin.time.Duration.Companion.milliseconds
 /**
  * Application-level owner of everything atmosphere-related: the registry of project frames, the shared
  * [AtmosphereTicker], the persisted enabled flag, pause reasons, event fan-out, the [IdleActivityProducer] and the
- * [TypingRhythmProducer] (both running while the plugin is enabled and at least one frame is registered).
+ * [TypingRhythmProducer] (both running while the plugin is enabled and at least one frame is registered), and one
+ * [CaretAnchorProducer] per live frame while the caret anchor setting is on.
  *
  * Every project frame is [attach]ed once (by `AtmosphereProjectActivity`) and stays registered until the
  * project closes ([detach], or disposal of the `parent` passed to [attach]). While the plugin is disabled the
@@ -67,12 +69,14 @@ class AtmosphereManager(
     enum class PauseReason { POWER_SAVE, USER_SNOOZE }
 
     private class Registration(
+        val project: Project,
         val rootPane: JRootPane,
         var effect: AtmosphereEffect,
         val parent: Disposable,
     ) {
         var atmosphere: FrameAtmosphere? = null
         var attachDisposable: Disposable? = null
+        var caretProducer: CaretAnchorProducer? = null
         var parentDisposed = false
     }
 
@@ -135,7 +139,10 @@ class AtmosphereManager(
     /** `true` while the user's snooze (see [snooze]) is active. */
     val isSnoozed: Boolean get() = PauseReason.USER_SNOOZE in pauseReasons
 
-    /** Id of the effect that applies to the current theme brightness (per-theme preset or the general effect). */
+    /**
+     * Id of the effect that applies to the current theme brightness (per-theme effect or the general effect) as
+     * configured.
+     */
     val currentEffectId: String
         get() = AtmosphereSettingsState.getInstance().state.normalized().effectIdFor(isDarkTheme())
 
@@ -157,6 +164,9 @@ class AtmosphereManager(
 
     /** Live [FrameAtmosphere] of [project], or `null` when not attached or disabled. */
     fun atmosphereFor(project: Project): FrameAtmosphere? = registrations[project]?.atmosphere
+
+    /** `true` while the caret of [project]'s selected editor is being followed as an anchor. */
+    fun isCaretAnchorRunning(project: Project): Boolean = registrations[project]?.caretProducer != null
 
     /** `true` while the idle/active producer is collecting `IdleTracker` events. */
     val isIdleProducerRunning: Boolean get() = idleJob?.isActive == true
@@ -200,7 +210,7 @@ class AtmosphereManager(
         effect: AtmosphereEffect = AtmosphereEffects.createOrDefault(null),
     ) {
         if (disposed || registrations.containsKey(project)) return
-        val registration = Registration(rootPane, effect, parent)
+        val registration = Registration(project, rootPane, effect, parent)
         registrations[project] = registration
         Disposer.register(parent) {
             registration.parentDisposed = true
@@ -392,7 +402,7 @@ class AtmosphereManager(
         if (disposed) return
         val state = AtmosphereSettingsState.getInstance().state
 
-        // 1. Effect: the per-theme preset of the current theme brightness, else the general effect
+        // 1. Effect: the per-theme effect of the current theme brightness, else the general effect
         swapEffects(state.effectIdFor(isDarkTheme()))
 
         // 2. Intensity & Speed, Reduce Motion (slower speed, capped FPS, no bursts/gusts)
@@ -405,9 +415,10 @@ class AtmosphereManager(
             atmosphere.pointerMode = state.pointerMode
         }
 
-        // 3. React to activity and typing
+        // 3. React to activity, typing and the caret
         updateIdleProducer()
         updateTypingProducer()
+        updateCaretProducers()
 
         // 4. Pause on focus loss
         if (!state.pauseOnFocusLoss) {
@@ -421,7 +432,7 @@ class AtmosphereManager(
 
     /**
      * Switches the effect of the current theme brightness to [id] for all registered frames and remembers it: the
-     * per-theme preset of the current brightness when one is configured, the general effect otherwise.
+     * per-theme effect of the current brightness when one is configured, the general effect otherwise.
      */
     @RequiresEdt
     fun setEffectId(id: String) {
@@ -494,10 +505,12 @@ class AtmosphereManager(
         registration.atmosphere = atmosphere
         registration.attachDisposable = attachDisposable
         ticker.add(atmosphere)
+        updateCaretProducer(registration)
     }
 
     private fun deactivate(registration: Registration) {
         val atmosphere = registration.atmosphere ?: return
+        stopCaretProducer(registration)
         registration.atmosphere = null
         ticker.remove(atmosphere)
         atmosphere.detach()
@@ -555,6 +568,33 @@ class AtmosphereManager(
             typingAttached = false
             typingProducer.detach() // resets the level, which forwards 0 to the frames
         }
+    }
+
+    private fun updateCaretProducers() {
+        for (registration in registrations.values) updateCaretProducer(registration)
+    }
+
+    /** Follows the caret for [registration] while enabled, attached and the setting is on; stops otherwise. */
+    private fun updateCaretProducer(registration: Registration) {
+        val atmosphere = registration.atmosphere
+        val shouldRun = !disposed && atmosphere != null && AtmosphereSettingsState.getInstance().state.caretAnchor
+        if (!shouldRun) {
+            stopCaretProducer(registration)
+            return
+        }
+        if (registration.caretProducer != null) return
+        val producer = CaretAnchorProducer(registration.project, registration.rootPane, { x, y, active ->
+            registration.atmosphere?.setAnchor(x, y, active)
+        })
+        registration.caretProducer = producer
+        Disposer.register(registration.attachDisposable ?: registration.parent, producer)
+        producer.start()
+    }
+
+    private fun stopCaretProducer(registration: Registration) {
+        val producer = registration.caretProducer ?: return
+        registration.caretProducer = null
+        Disposer.dispose(producer)
     }
 
     /** Forwards a flow change and keeps polling the decay (every [FLOW_POLL_INTERVAL]) until the level settles. */

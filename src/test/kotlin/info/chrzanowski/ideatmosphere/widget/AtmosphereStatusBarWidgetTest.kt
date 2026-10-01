@@ -2,6 +2,7 @@ package info.chrzanowski.ideatmosphere.widget
 
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.Separator
 import com.intellij.openapi.actionSystem.ToggleAction
 import com.intellij.openapi.util.Disposer
@@ -54,17 +55,18 @@ class AtmosphereStatusBarWidgetTest : BasePlatformTestCase() {
 
     fun `test popup lists every effect then snooze and settings`() {
         val children = group().getChildren(null).toList()
+        val ids = AtmosphereEffects.selectableIds
 
-        val effects = children.take(AtmosphereEffects.ids.size)
+        val effects = children.take(ids.size)
         assertEquals(
-            AtmosphereEffects.ids.map { AtmosphereBundle.message("effect.$it.name") },
+            ids.map { AtmosphereBundle.message("effect.$it.name") },
             effects.map { it.templatePresentation.text },
         )
         assertTrue(effects.all { it is ToggleAction })
-        assertTrue(children[AtmosphereEffects.ids.size] is Separator)
-        assertEquals(AtmosphereBundle.message("widget.popup.snooze"), update(children[AtmosphereEffects.ids.size + 1]).presentation.text)
+        assertTrue(children[ids.size] is Separator)
+        assertEquals(AtmosphereBundle.message("widget.popup.snooze"), update(children[ids.size + 1]).presentation.text)
         assertEquals(AtmosphereBundle.message("widget.popup.settings"), children.last().templatePresentation.text)
-        assertEquals(AtmosphereEffects.ids.size + 3, children.size)
+        assertEquals(ids.size + 3, children.size)
     }
 
     fun `test selecting an effect switches it and marks it selected`() {
@@ -87,7 +89,7 @@ class AtmosphereStatusBarWidgetTest : BasePlatformTestCase() {
         assertEquals("snow", manager.currentEffectId)
     }
 
-    fun `test selecting an effect updates the preset of the current theme when one is set`() {
+    fun `test selecting an effect updates the per-theme effect of the current theme when one is set`() {
         val state = AtmosphereSettingsState.getInstance().state
         state.darkEffectId = "rain"
         val starfield = group().getChildren(null).filterIsInstance<ToggleAction>().single {
@@ -101,7 +103,7 @@ class AtmosphereStatusBarWidgetTest : BasePlatformTestCase() {
     }
 
     fun `test snooze entry pauses for an hour and turns into resume`() {
-        val snooze = group().getChildren(null)[AtmosphereEffects.ids.size + 1]
+        val snooze = group().getChildren(null)[AtmosphereEffects.selectableIds.size + 1]
 
         assertEquals(AtmosphereBundle.message("widget.popup.snooze"), update(snooze).presentation.text)
         snooze.actionPerformed(TestActionEvent.createTestEvent(snooze))

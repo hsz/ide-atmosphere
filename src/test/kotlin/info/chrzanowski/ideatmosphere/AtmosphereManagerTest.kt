@@ -92,6 +92,40 @@ class AtmosphereManagerTest : BasePlatformTestCase() {
         assertFalse(atmosphere.isPointerTracking)
     }
 
+    fun `test caret anchor producer follows the setting and the frame lifecycle`() {
+        attachFirst()
+        assertFalse("off by default", manager.isCaretAnchorRunning(project))
+        assertEquals("attaching tells the effect there is no anchor", false, first.effect.anchor?.third)
+
+        val state = AtmosphereSettingsState.getInstance().state
+        state.caretAnchor = true
+        manager.applySettings()
+        assertTrue(manager.isCaretAnchorRunning(project))
+
+        // The producer reports through the frame: with the fixture editor outside the frame the anchor stays off,
+        // and the frame forwards an anchor only while attached.
+        val atmosphere = manager.atmosphereFor(project)!!
+        assertFalse(atmosphere.isAnchored)
+        atmosphere.setAnchor(10f, 20f, true)
+        assertEquals(Triple(10f, 20f, true), first.effect.anchor)
+
+        manager.isEnabled = false
+        assertFalse("no frame, no producer", manager.isCaretAnchorRunning(project))
+        assertEquals(false, first.effect.anchor?.third)
+        manager.isEnabled = true
+        assertTrue("re-enabling restarts the producer", manager.isCaretAnchorRunning(project))
+
+        state.caretAnchor = false
+        manager.applySettings()
+        assertFalse(manager.isCaretAnchorRunning(project))
+
+        state.caretAnchor = true
+        manager.applySettings()
+        assertTrue(manager.isCaretAnchorRunning(project))
+        manager.detach(project)
+        assertFalse(manager.isCaretAnchorRunning(project))
+    }
+
     fun `test reduce motion slows the effect, caps the ticker and drops bursts and gusts`() {
         attachFirst()
         val atmosphere = manager.atmosphereFor(project)!!

@@ -58,6 +58,19 @@ interface AtmosphereEffect {
      */
     fun onPointerPressed(x: Float, y: Float) {}
 
+    /**
+     * The mouse wheel turned at root-pane coordinates (`x`, `y`) by `amount` notches (positive = scrolled down,
+     * fractional for high-resolution devices); the event itself is neither received nor consumed. Effects typically
+     * send a gust through nearby particles in the direction the content moves. Default no-op; must not allocate.
+     */
+    fun onScroll(x: Float, y: Float, amount: Float) {}
+
+    /**
+     * Places (`active = true`) or removes (`active = false`) a soft anchor at root-pane coordinates (`x`, `y`) — the
+     * editor caret — around which a few particles gently gather. Default no-op; must not allocate.
+     */
+    fun setAnchor(x: Float, y: Float, active: Boolean) {}
+
     /** Switches how particles react to the pointer (avoid, attract, ignore). Default no-op. */
     fun setPointerMode(mode: PointerMode) {}
 

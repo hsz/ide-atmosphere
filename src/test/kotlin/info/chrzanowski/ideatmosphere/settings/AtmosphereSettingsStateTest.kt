@@ -35,15 +35,17 @@ class AtmosphereSettingsStateTest : BasePlatformTestCase() {
         assertFalse(state.reduceMotion)
         assertNull(state.darkEffectId)
         assertNull(state.lightEffectId)
+        assertFalse(state.caretAnchor)
         assertEquals(AtmosphereSettingsState.State(), state)
         assertEquals(state, state.normalized())
     }
 
-    fun `test reduce motion and per-theme presets round-trip through XML`() {
+    fun `test reduce motion, per-theme presets and the caret anchor round-trip through XML`() {
         val original = AtmosphereSettingsState.State(
             reduceMotion = true,
             darkEffectId = "starfield",
             lightEffectId = "rain",
+            caretAnchor = true,
         )
 
         val restored = roundTrip(original)
@@ -58,6 +60,7 @@ class AtmosphereSettingsStateTest : BasePlatformTestCase() {
         assertEquals("true", options["reduceMotion"])
         assertEquals("starfield", options["darkEffectId"])
         assertEquals("rain", options["lightEffectId"])
+        assertEquals("true", options["caretAnchor"])
         // Plain attributes only, no nested elements.
         assertTrue(XmlSerializer.serialize(original).getChildren("option").all { it.children.isEmpty() })
     }
@@ -158,6 +161,7 @@ class AtmosphereSettingsStateTest : BasePlatformTestCase() {
             reduceMotion = true,
             darkEffectId = "starfield",
             lightEffectId = "rain",
+            caretAnchor = true,
         )
 
         val xml = XmlSerializer.serialize(state)
@@ -168,11 +172,11 @@ class AtmosphereSettingsStateTest : BasePlatformTestCase() {
         assertEquals(
             setOf(
                 "effectId", "intensity", "speed", "reactToActivity", "pauseOnFocusLoss", "reactToTyping", "pointerMode",
-                "avoidMouse", "reduceMotion", "darkEffectId", "lightEffectId",
+                "avoidMouse", "reduceMotion", "darkEffectId", "lightEffectId", "caretAnchor",
             ),
             options.map { it.getAttributeValue("name") }.toSet(),
         )
-        assertEquals(11, options.size)
+        assertEquals(12, options.size)
         assertTrue(options.all { it.getAttributeValue("value") != null && it.children.isEmpty() })
     }
 

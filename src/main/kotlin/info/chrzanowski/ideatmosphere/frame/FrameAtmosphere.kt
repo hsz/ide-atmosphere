@@ -16,6 +16,7 @@ import java.awt.Rectangle
 import java.awt.Toolkit
 import java.awt.event.AWTEventListener
 import java.awt.event.MouseEvent
+import java.awt.event.MouseWheelEvent
 import javax.swing.JComponent
 import javax.swing.JRootPane
 import javax.swing.SwingUtilities
@@ -59,6 +60,8 @@ class FrameAtmosphere(
     private val context: EffectContext,
     maxParticles: Int = DEFAULT_MAX_PARTICLES,
     private val target: RepaintTarget = SwingRepaintTarget(rootPane),
+    /** Monotonic clock for the scroll-gust throttle; injectable so tests need not sleep. */
+    private val nanoTime: () -> Long = System::nanoTime,
 ) {
 
     /** Abstraction over the two repaint channels so routing can be verified without a showing window. */
@@ -87,18 +90,21 @@ class FrameAtmosphere(
         }
 
     /**
-     * Reduce Motion: the `SUCCESS` / `FAILURE` reactions (bursts and gusts) are not forwarded to the effect; every
-     * other event still is, so the slowed-down base motion keeps following idle and activity.
+     * Reduce Motion: the `SUCCESS` / `FAILURE` reactions (bursts and gusts) are not forwarded to the effect, nor are
+     * click bursts, scroll gusts and the caret anchor; every other event still is, so the slowed-down base motion
+     * keeps following idle and activity.
      */
     var reduceMotion: Boolean = false
         set(value) {
             field = value
             if (value && attached) effect.setFlow(0f)
+            pushAnchor()
         }
 
     /**
-     * How the effect reacts to the pointer. The pointer (and clicks, see [observePointer]) is observed through a
-     * passive `AWTEventListener` only while the mode is not [PointerMode.OFF]; such listeners cannot consume events.
+     * How the effect reacts to the pointer. The pointer (clicks and wheel turns too, see [observePointer]) is observed
+     * through a passive `AWTEventListener` only while the mode is not [PointerMode.OFF]; such listeners cannot
+     * consume events. [PointerMode.OFF] also switches the caret anchor off.
      */
     var pointerMode: PointerMode = PointerMode.AVOID
         set(value) {
@@ -106,7 +112,17 @@ class FrameAtmosphere(
             effect.setPointerMode(value)
             updatePointerTracking()
             if (value == PointerMode.OFF) clearPointer()
+            pushAnchor()
         }
+
+    private var anchorX = 0f
+    private var anchorY = 0f
+    private var anchorActive = false
+    private var lastGustNanos = Long.MIN_VALUE
+
+    /** Scroll gusts forwarded to the effect since [attach]; the throttle makes this observable in tests. */
+    var gustCount: Int = 0
+        private set
 
     internal var isPointerTracking: Boolean = false
         private set
@@ -171,7 +187,10 @@ class FrameAtmosphere(
         effect.start(context)
         painter.active = true
         attached = true
+        lastGustNanos = Long.MIN_VALUE
+        gustCount = 0
         updatePointerTracking()
+        pushAnchor()
         Disposer.register(parent) { detach() }
     }
 
@@ -186,6 +205,7 @@ class FrameAtmosphere(
         clearPointer()
         painter.active = false
         painter.nestedPaint = null
+        effect.setAnchor(0f, 0f, false)
         effect.stop()
         painterDisposable?.let { Disposer.dispose(it) }
         painterDisposable = null
@@ -210,12 +230,35 @@ class FrameAtmosphere(
         effect.onPointerChanged(0f, 0f, false)
     }
 
+    /**
+     * Places (or, with `active = false`, removes) the caret anchor at root-pane coordinates. The effect sees it only
+     * while attached, not under [reduceMotion] and not in [PointerMode.OFF]; the state is kept so it is re-applied when
+     * those change.
+     */
+    fun setAnchor(x: Float, y: Float, active: Boolean) {
+        anchorX = x
+        anchorY = y
+        anchorActive = active && x.isFinite() && y.isFinite()
+        pushAnchor()
+    }
+
+    /** `true` while the effect currently sees a caret anchor. */
+    val isAnchored: Boolean get() = attached && anchorActive && !reduceMotion && pointerMode != PointerMode.OFF
+
+    private fun pushAnchor() {
+        if (!attached) return
+        effect.setAnchor(anchorX, anchorY, isAnchored)
+    }
+
     private fun updatePointerTracking() {
         val tracking = attached && pointerMode != PointerMode.OFF
         if (tracking == isPointerTracking) return
         val toolkit = Toolkit.getDefaultToolkit()
         if (tracking) {
-            toolkit.addAWTEventListener(pointerListener, AWTEvent.MOUSE_EVENT_MASK or AWTEvent.MOUSE_MOTION_EVENT_MASK)
+            toolkit.addAWTEventListener(
+                pointerListener,
+                AWTEvent.MOUSE_EVENT_MASK or AWTEvent.MOUSE_MOTION_EVENT_MASK or AWTEvent.MOUSE_WHEEL_EVENT_MASK,
+            )
         } else {
             toolkit.removeAWTEventListener(pointerListener)
         }
@@ -223,8 +266,10 @@ class FrameAtmosphere(
     }
 
     /**
-     * Forwards the pointer position (and, for `MOUSE_PRESSED`, a click burst) to the effect. Observation only: the
-     * event is never consumed or altered. Bursts are skipped under [reduceMotion].
+     * Forwards the pointer position (and, for `MOUSE_PRESSED`, a click burst; for `MOUSE_WHEEL`, a scroll gust) to
+     * the effect. Observation only: the event is never consumed or altered. Bursts and gusts are skipped under
+     * [reduceMotion]; gusts are additionally throttled to one per [GUST_INTERVAL_MILLIS], since high-resolution
+     * devices deliver wheel events in streams.
      */
     internal fun observePointer(event: MouseEvent) {
         if (!attached || pointerMode == PointerMode.OFF) return
@@ -239,7 +284,18 @@ class FrameAtmosphere(
         val x = point.x.toFloat()
         val y = point.y.toFloat()
         effect.onPointerChanged(x, y, inside)
-        if (inside && !reduceMotion && event.id == MouseEvent.MOUSE_PRESSED) effect.onPointerPressed(x, y)
+        if (!inside || reduceMotion) return
+        if (event.id == MouseEvent.MOUSE_PRESSED) {
+            effect.onPointerPressed(x, y)
+        } else if (event is MouseWheelEvent && event.id == MouseEvent.MOUSE_WHEEL) {
+            val amount = event.preciseWheelRotation.toFloat()
+            if (amount == 0f || !amount.isFinite()) return
+            val now = nanoTime()
+            if (lastGustNanos != Long.MIN_VALUE && now - lastGustNanos < GUST_INTERVAL_MILLIS * 1_000_000L) return
+            lastGustNanos = now
+            gustCount++
+            effect.onScroll(x, y, amount)
+        }
     }
 
     private fun snapOpacity() {
@@ -447,5 +503,8 @@ class FrameAtmosphere(
 
         /** Duration of the fade-in / fade-out triggered by [setVisible]. */
         const val FADE_SECONDS: Float = 0.5f
+
+        /** Minimum spacing of scroll gusts; a trackpad fling delivers many wheel events per frame. */
+        const val GUST_INTERVAL_MILLIS: Long = 80L
     }
 }

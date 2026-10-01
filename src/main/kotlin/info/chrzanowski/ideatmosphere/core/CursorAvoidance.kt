@@ -16,8 +16,12 @@ import kotlin.math.sqrt
  * piling up on top of it.
  *
  * In either mode the extra velocity decays with [DAMPING] once the pointer has moved on, so particles glide back to
- * their own motion. A [burst] adds an outward puff around a point (a mouse click) regardless of the mode and fades
- * the same way.
+ * their own motion. A [burst] adds an outward puff around a point (a mouse click) regardless of the mode, a [gust]
+ * a directional push around a point (a scroll), and both fade the same way.
+ *
+ * An optional [setAnchor] (the editor caret) is a second, smaller attractor: within [ANCHOR_RADIUS] it uses the
+ * [PointerMode.ATTRACT] steering with the same soft stop, at [ANCHOR_STRENGTH] of the pointer's pull, whatever the
+ * pointer mode is, so a few particles gather near where the user types. Everything is ignored in [PointerMode.OFF].
  */
 internal class CursorAvoidance(capacity: Int) {
     private val vx = FloatArray(capacity)
@@ -25,6 +29,9 @@ internal class CursorAvoidance(capacity: Int) {
     private var cursorX = 0f
     private var cursorY = 0f
     private var inside = false
+    private var anchorX = 0f
+    private var anchorY = 0f
+    private var anchorActive = false
 
     var mode: PointerMode = PointerMode.AVOID
         set(value) {
@@ -32,12 +39,20 @@ internal class CursorAvoidance(capacity: Int) {
             if (value == PointerMode.OFF) clear()
         }
 
-    private val active: Boolean get() = inside && mode != PointerMode.OFF
+    /** `true` while an anchor is set and the pointer mode allows steering. */
+    val isAnchored: Boolean get() = anchorActive && mode != PointerMode.OFF
 
     fun setPointer(x: Float, y: Float, inside: Boolean) {
         this.inside = inside && x.isFinite() && y.isFinite()
         cursorX = x
         cursorY = y
+    }
+
+    /** Places (or, with `active = false`, removes) the anchor at root-pane coordinates (`x`, `y`). */
+    fun setAnchor(x: Float, y: Float, active: Boolean) {
+        anchorActive = active && x.isFinite() && y.isFinite()
+        anchorX = x
+        anchorY = y
     }
 
     fun reset(index: Int) {
@@ -47,6 +62,7 @@ internal class CursorAvoidance(capacity: Int) {
 
     fun clear() {
         inside = false
+        anchorActive = false
         vx.fill(0f)
         vy.fill(0f)
     }
@@ -55,37 +71,72 @@ internal class CursorAvoidance(capacity: Int) {
         val damping = exp(-DAMPING * delta)
         vx[index] *= damping
         vy[index] *= damping
-        if (!active) return
-        val dx = x - cursorX
-        val dy = y - cursorY
-        val distance = sqrt(dx * dx + dy * dy)
-        val radius = RADIUS * scale
-        if (distance >= radius) return
-        // A particle exactly under the pointer has no direction; spread those by index (golden angle) instead.
-        val awayX = if (distance > 0.001f) dx / distance else cos(index * 2.399963f)
-        val awayY = if (distance > 0.001f) dy / distance else sin(index * 2.399963f)
-        if (mode == PointerMode.ATTRACT) {
-            val stop = STOP_RADIUS * scale
-            if (distance <= stop) {
-                // Soft stop: no pull, and whatever speed is left bleeds off quickly so the particle hovers.
-                val hold = exp(-STOP_DAMPING * delta)
-                vx[index] *= hold
-                vy[index] *= hold
-                return
+        if (mode == PointerMode.OFF) return
+        var steered = false
+        if (inside) {
+            val dx = x - cursorX
+            val dy = y - cursorY
+            val distance = sqrt(dx * dx + dy * dy)
+            val radius = RADIUS * scale
+            if (distance < radius) {
+                steered = true
+                // A particle exactly under the pointer has no direction; spread those by index (golden angle) instead.
+                val awayX = if (distance > 0.001f) dx / distance else cos(index * 2.399963f)
+                val awayY = if (distance > 0.001f) dy / distance else sin(index * 2.399963f)
+                if (mode == PointerMode.ATTRACT) {
+                    attract(index, awayX, awayY, distance, radius, delta, damping, scale, 1f)
+                } else {
+                    val proximity = 1f - distance / radius
+                    // Exact integral of a constant acceleration under exponential damping over this tick.
+                    val impulse = ACCELERATION * scale * proximity * sqrt(proximity) * (1f - damping) / DAMPING
+                    vx[index] += awayX * impulse
+                    vy[index] += awayY * impulse
+                }
             }
-            val reach = (distance - stop) / (radius - stop)
-            val pull = 1f - reach
-            val impulse = ACCELERATION * scale * pull * sqrt(pull) * (1f - damping) / DAMPING
-            vx[index] -= awayX * impulse
-            vy[index] -= awayY * impulse
-        } else {
-            val proximity = 1f - distance / radius
-            // Exact integral of a constant acceleration under exponential damping over this tick.
-            val impulse = ACCELERATION * scale * proximity * sqrt(proximity) * (1f - damping) / DAMPING
-            vx[index] += awayX * impulse
-            vy[index] += awayY * impulse
         }
-        clamp(index, MAX_SPEED * scale)
+        if (anchorActive) {
+            val dx = x - anchorX
+            val dy = y - anchorY
+            val distance = sqrt(dx * dx + dy * dy)
+            val radius = ANCHOR_RADIUS * scale
+            if (distance < radius) {
+                steered = true
+                val awayX = if (distance > 0.001f) dx / distance else cos(index * 2.399963f)
+                val awayY = if (distance > 0.001f) dy / distance else sin(index * 2.399963f)
+                attract(index, awayX, awayY, distance, radius, delta, damping, scale, ANCHOR_STRENGTH)
+            }
+        }
+        if (steered) clamp(index, MAX_SPEED * scale)
+    }
+
+    /**
+     * Pulls particle [index] towards an attractor it is [distance] away from, along the unit vector pointing *away*
+     * from it; the pull is strongest just outside [STOP_RADIUS], vanishes at [radius], and inside the stop radius
+     * the remaining speed bleeds off quickly so the particle hovers.
+     */
+    private fun attract(
+        index: Int,
+        awayX: Float,
+        awayY: Float,
+        distance: Float,
+        radius: Float,
+        delta: Float,
+        damping: Float,
+        scale: Float,
+        strength: Float,
+    ) {
+        val stop = STOP_RADIUS * scale
+        if (distance <= stop) {
+            val hold = exp(-STOP_DAMPING * delta)
+            vx[index] *= hold
+            vy[index] *= hold
+            return
+        }
+        val reach = (distance - stop) / (radius - stop)
+        val pull = 1f - reach
+        val impulse = ACCELERATION * strength * scale * pull * sqrt(pull) * (1f - damping) / DAMPING
+        vx[index] -= awayX * impulse
+        vy[index] -= awayY * impulse
     }
 
     /**
@@ -110,6 +161,43 @@ internal class CursorAvoidance(capacity: Int) {
         }
     }
 
+    /**
+     * Pushes every particle of `count` within [GUST_RADIUS] of (`centerX`, `centerY`) along the direction
+     * (`dirX`, `dirY`) (normalised here), strongest at the centre, with `strength` in `0..1` scaling the peak
+     * [GUST_SPEED]. Positions are read from [xs] / [ys]; like a [burst], the gust rides on the damped velocity.
+     */
+    fun gust(
+        centerX: Float,
+        centerY: Float,
+        dirX: Float,
+        dirY: Float,
+        strength: Float,
+        scale: Float,
+        count: Int,
+        xs: FloatArray,
+        ys: FloatArray,
+    ) {
+        if (mode == PointerMode.OFF || !centerX.isFinite() || !centerY.isFinite() || !strength.isFinite()) return
+        val length = sqrt(dirX * dirX + dirY * dirY)
+        if (!(length > 0.001f) || !length.isFinite()) return
+        val peak = GUST_SPEED * scale * strength.coerceIn(0f, 1f)
+        if (peak <= 0f) return
+        val ux = dirX / length
+        val uy = dirY / length
+        val radius = GUST_RADIUS * scale
+        for (i in 0 until count) {
+            val dx = xs[i] - centerX
+            val dy = ys[i] - centerY
+            val distance = sqrt(dx * dx + dy * dy)
+            if (distance >= radius) continue
+            val proximity = 1f - distance / radius
+            val kick = peak * proximity
+            vx[i] += ux * kick
+            vy[i] += uy * kick
+            clamp(i, GUST_SPEED * scale)
+        }
+    }
+
     private fun clamp(index: Int, maximum: Float) {
         val velocity = sqrt(vx[index] * vx[index] + vy[index] * vy[index])
         if (velocity > maximum) {
@@ -131,6 +219,15 @@ internal class CursorAvoidance(capacity: Int) {
         /** Reach of a click burst in user pixels. */
         const val BURST_RADIUS: Float = 140f
 
+        /** Reach of a scroll gust in user pixels; wider than a burst, since a scroll moves a whole editor. */
+        const val GUST_RADIUS: Float = 220f
+
+        /** Reach of the caret anchor in user pixels: a small gathering, not a second pointer. */
+        const val ANCHOR_RADIUS: Float = 90f
+
+        /** Pull of the caret anchor relative to the pointer's attract pull. */
+        const val ANCHOR_STRENGTH: Float = 0.6f
+
         /**
          * Escape speed cap in px/s: clearly above every atmosphere's own motion, yet low enough that a fleeing particle
          * moves only a few pixels per frame at the 20–30 FPS animation rate. Faster escapes jumped by 10+ px per frame,
@@ -140,6 +237,9 @@ internal class CursorAvoidance(capacity: Int) {
 
         /** Peak outward speed of a click burst in px/s; brief, since it decays with [DAMPING]. */
         const val BURST_SPEED: Float = 200f
+
+        /** Peak speed of a full-strength scroll gust in px/s; gentler than a burst because scrolls come in streams. */
+        const val GUST_SPEED: Float = 140f
 
         /** Peak acceleration in px/s² right under the pointer; the steady state is `ACCELERATION / DAMPING`. */
         private const val ACCELERATION = 600f

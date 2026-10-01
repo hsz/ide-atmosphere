@@ -136,6 +136,23 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
         assertFalse(configurable.isModified())
     }
 
+    fun `test caret anchor checkbox is off by default and applies to the state`() {
+        assertFalse(checkBox("caretAnchor").isSelected)
+        assertFalse(configurable.isModified())
+
+        checkBox("caretAnchor").isSelected = true
+        assertTrue(configurable.isModified())
+        assertFalse(settings.state.caretAnchor)
+
+        configurable.apply()
+        assertTrue(settings.state.caretAnchor)
+        assertEquals(AtmosphereSettingsState.State(caretAnchor = true), committedStates.single())
+        assertFalse(configurable.isModified())
+
+        configurable.reset()
+        assertTrue(checkBox("caretAnchor").isSelected)
+    }
+
     fun `test reduce motion and per-theme presets are edited in the draft until Apply`() {
         checkBox("reduceMotion").isSelected = true
         presetCombo("lightEffectId").selectedItem = "rain"
@@ -169,7 +186,7 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
             val combo = presetCombo(name)
             val items = (0 until combo.itemCount).map { combo.getItemAt(it) }
 
-            assertEquals(listOf<String?>(null) + AtmosphereEffects.ids, items)
+            assertEquals(listOf<String?>(null) + AtmosphereEffects.selectableIds, items)
             assertNull(combo.selectedItem)
             assertEquals(AtmosphereBundle.message("settings.preset.same"), renderedText(combo, null, 0))
             items.drop(1).forEachIndexed { index, id ->
@@ -375,11 +392,11 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
         assertEquals(100, slider("speed").value)
     }
 
-    fun `test combo lists every registered effect with its name`() {
+    fun `test combo lists every registered effect with their names`() {
         val combo = effectCombo()
         val items = (0 until combo.itemCount).map { combo.getItemAt(it) }
 
-        assertEquals(AtmosphereEffects.ids.toList(), items)
+        assertEquals(AtmosphereEffects.selectableIds, items)
         assertEquals(AtmosphereEffects.DEFAULT_ID, combo.selectedItem)
         items.forEachIndexed { index, id ->
             assertEquals(AtmosphereBundle.message("effect.$id.name"), renderedText(combo, id, index))
@@ -389,11 +406,11 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
     fun `test description follows the selected effect without touching settings`() {
         assertTrue(descriptionText().contains(description(AtmosphereEffects.DEFAULT_ID)))
 
-        for (id in AtmosphereEffects.ids) {
+        for (id in AtmosphereEffects.selectableIds) {
             effectCombo().selectedItem = id
 
             assertTrue(id, descriptionText().contains(description(id)))
-            for (other in AtmosphereEffects.ids - id) {
+            for (other in AtmosphereEffects.selectableIds - id) {
                 assertFalse("$id vs $other", descriptionText().contains(description(other)))
             }
         }
@@ -418,7 +435,7 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
     }
 
     fun `test bundle names and describes every effect`() {
-        for (id in AtmosphereEffects.ids + listOf("fireflies", "sakura", "snow")) {
+        for (id in AtmosphereEffects.selectableIds + listOf("fireflies", "sakura", "snow", "rain", "starfield")) {
             assertTrue("effect.$id.name", AtmosphereBundle.containsKey("effect.$id.name"))
             assertTrue("effect.$id.description", AtmosphereBundle.containsKey("effect.$id.description"))
             assertTrue(AtmosphereBundle.message("effect.$id.name").isNotBlank())
@@ -498,6 +515,7 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
             "previewFailure",
             "previewComment",
             "pointerMode",
+            "caretAnchor",
             "pauseOnFocusLoss",
             "reduceMotion",
             "lightEffectId",

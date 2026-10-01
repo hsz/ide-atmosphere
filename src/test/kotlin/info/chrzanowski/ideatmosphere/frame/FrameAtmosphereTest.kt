@@ -14,6 +14,7 @@ import info.chrzanowski.ideatmosphere.render.AtmospherePainter
 import java.awt.Color
 import java.awt.Rectangle
 import java.awt.event.MouseEvent
+import java.awt.event.MouseWheelEvent
 import java.awt.image.BufferedImage
 import javax.swing.JComponent
 import javax.swing.JPanel
@@ -92,8 +93,15 @@ class FrameAtmosphereTest : BasePlatformTestCase() {
         }
     }
 
+    private var nowNanos = 0L
+
     private fun newAtmosphere(target: FrameAtmosphere.RepaintTarget = FrameAtmosphere.SwingRepaintTarget(rootPane)) =
-        FrameAtmosphere(rootPane, effect, EffectContext.forTesting(), maxParticles = 8, target = target)
+        FrameAtmosphere(rootPane, effect, EffectContext.forTesting(), maxParticles = 8, target = target, nanoTime = { nowNanos })
+
+    private fun wheel(component: JComponent, x: Int, y: Int, rotation: Double): MouseWheelEvent = MouseWheelEvent(
+        component, MouseEvent.MOUSE_WHEEL, 0L, 0, x, y, 0, 0, 0, false,
+        MouseWheelEvent.WHEEL_UNIT_SCROLL, 3, if (rotation >= 0) 1 else -1, rotation,
+    )
 
     fun `test pointer observation converts nested coordinates and never consumes input`() {
         val atmosphere = newAtmosphere(FakeTarget())
@@ -190,6 +198,98 @@ class FrameAtmosphereTest : BasePlatformTestCase() {
         atmosphere.observePointer(press)
         assertEquals(2, effect.presses.size)
         assertFalse(effect.pointerInside)
+    }
+
+    fun `test mouse wheel is observed as a throttled scroll gust but never consumed`() {
+        val atmosphere = newAtmosphere(FakeTarget())
+        atmosphere.attach(parent)
+        val child = JPanel()
+        rootPane.layeredPane.add(child)
+        child.setBounds(30, 40, 100, 100)
+
+        val scroll = wheel(child, 10, 20, 1.0)
+        atmosphere.observePointer(scroll)
+        assertEquals(listOf(Triple(40f, 60f, 1f)), effect.scrolls)
+        assertTrue(effect.pointerInside)
+        assertFalse(scroll.isConsumed)
+        assertEquals(1, atmosphere.gustCount)
+
+        // A stream of wheel events within the throttle window is one gust; after the interval the next one passes.
+        nowNanos += (FrameAtmosphere.GUST_INTERVAL_MILLIS - 1) * 1_000_000L
+        atmosphere.observePointer(wheel(child, 10, 20, 0.25))
+        atmosphere.observePointer(wheel(child, 10, 20, 0.25))
+        assertEquals(1, effect.scrolls.size)
+        nowNanos += 1_000_000L
+        atmosphere.observePointer(wheel(child, 10, 20, -0.5))
+        assertEquals(2, effect.scrolls.size)
+        assertEquals(Triple(40f, 60f, -0.5f), effect.scrolls.last())
+        assertEquals(2, atmosphere.gustCount)
+
+        // Dispatched through the real toolkit queue the passive listener sees it too, and the IDE still gets it.
+        nowNanos += FrameAtmosphere.GUST_INTERVAL_MILLIS * 1_000_000L
+        val dispatched = wheel(rootPane, 100, 100, 2.0)
+        rootPane.dispatchEvent(dispatched)
+        assertEquals(3, effect.scrolls.size)
+        assertEquals(Triple(100f, 100f, 2f), effect.scrolls.last())
+        assertFalse(dispatched.isConsumed)
+
+        // A zero rotation or a wheel turn outside the frame is not a gust.
+        nowNanos += FrameAtmosphere.GUST_INTERVAL_MILLIS * 1_000_000L
+        atmosphere.observePointer(wheel(child, 10, 20, 0.0))
+        atmosphere.observePointer(wheel(rootPane, -5, 20, 1.0))
+        assertEquals(3, effect.scrolls.size)
+
+        // Reduce Motion drops the gust but keeps following the pointer; Off drops everything.
+        atmosphere.reduceMotion = true
+        atmosphere.observePointer(wheel(child, 10, 20, 1.0))
+        assertEquals(3, effect.scrolls.size)
+        assertTrue(effect.pointerInside)
+        atmosphere.reduceMotion = false
+        atmosphere.pointerMode = PointerMode.OFF
+        atmosphere.observePointer(wheel(child, 10, 20, 1.0))
+        assertEquals(3, effect.scrolls.size)
+        assertFalse(effect.pointerInside)
+    }
+
+    fun `test caret anchor is forwarded while attached and gated by reduce motion and pointer mode`() {
+        val atmosphere = newAtmosphere(FakeTarget())
+        // Before attach the anchor is remembered but not forwarded.
+        atmosphere.setAnchor(120f, 80f, true)
+        assertNull(effect.anchor)
+        assertFalse(atmosphere.isAnchored)
+
+        atmosphere.attach(parent)
+        assertEquals(Triple(120f, 80f, true), effect.anchor)
+        assertTrue(atmosphere.isAnchored)
+
+        atmosphere.setAnchor(130f, 90f, true)
+        assertEquals(Triple(130f, 90f, true), effect.anchor)
+
+        atmosphere.reduceMotion = true
+        assertEquals(Triple(130f, 90f, false), effect.anchor)
+        assertFalse(atmosphere.isAnchored)
+        atmosphere.reduceMotion = false
+        assertEquals(Triple(130f, 90f, true), effect.anchor)
+
+        atmosphere.pointerMode = PointerMode.OFF
+        assertEquals(false, effect.anchor?.third)
+        assertFalse(atmosphere.isAnchored)
+        atmosphere.pointerMode = PointerMode.ATTRACT
+        assertEquals(Triple(130f, 90f, true), effect.anchor)
+        assertTrue(atmosphere.isAnchored)
+
+        atmosphere.setAnchor(Float.NaN, 90f, true)
+        assertEquals(false, effect.anchor?.third)
+        atmosphere.setAnchor(140f, 100f, true)
+        atmosphere.setAnchor(0f, 0f, false)
+        assertEquals(false, effect.anchor?.third)
+        assertFalse(atmosphere.isAnchored)
+
+        atmosphere.setAnchor(140f, 100f, true)
+        assertTrue(atmosphere.isAnchored)
+        atmosphere.detach()
+        assertEquals("detaching clears the anchor on the effect", false, effect.anchor?.third)
+        assertFalse(atmosphere.isAnchored)
     }
 
     fun `test attach registers the painter and shows the glass pane`() {
