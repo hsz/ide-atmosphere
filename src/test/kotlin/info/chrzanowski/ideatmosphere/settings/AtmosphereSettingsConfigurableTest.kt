@@ -4,6 +4,7 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.ui.SimpleColoredComponent
 import info.chrzanowski.ideatmosphere.AtmosphereBundle
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
+import info.chrzanowski.ideatmosphere.core.PointerMode
 import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
 import java.awt.Component
 import java.awt.Container
@@ -81,8 +82,16 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
 
         assertEquals(AtmosphereBundle.message("settings.enabled"), checkBox("enabled").text)
         assertEquals(AtmosphereBundle.message("settings.reactToActivity"), checkBox("reactToActivity").text)
-        assertEquals(AtmosphereBundle.message("settings.avoidMouse"), checkBox("avoidMouse").text)
+        assertEquals(AtmosphereBundle.message("settings.reactToTyping"), checkBox("reactToTyping").text)
+        assertTrue(comments.any { it.contains(AtmosphereBundle.message("settings.reactToTyping.comment")) })
+        assertTrue(AtmosphereBundle.message("settings.pointerMode") in labels)
+        assertTrue(comments.any { it.contains(AtmosphereBundle.message("settings.pointerMode.comment")) })
         assertEquals(AtmosphereBundle.message("settings.pauseOnFocusLoss"), checkBox("pauseOnFocusLoss").text)
+        assertEquals(AtmosphereBundle.message("settings.reduceMotion"), checkBox("reduceMotion").text)
+        assertTrue(comments.any { it.contains(AtmosphereBundle.message("settings.reduceMotion.comment")) })
+        for (key in listOf("settings.themePresets", "settings.lightEffect", "settings.darkEffect")) {
+            assertTrue(key, AtmosphereBundle.message(key) in labels)
+        }
         assertEquals(AtmosphereBundle.message("settings.preview.success"), button("previewSuccess").text)
         assertEquals(AtmosphereBundle.message("settings.preview.failure"), button("previewFailure").text)
         for (key in listOf("settings.effect", "settings.intensity", "settings.speed", "settings.behaviour")) {
@@ -100,8 +109,9 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
         slider("intensity").value = 150
         slider("speed").value = 30
         checkBox("reactToActivity").isSelected = false
+        checkBox("reactToTyping").isSelected = false
         checkBox("pauseOnFocusLoss").isSelected = false
-        checkBox("avoidMouse").isSelected = false
+        pointerModeCombo().selectedItem = PointerMode.ATTRACT
 
         assertTrue(configurable.isModified())
         assertEquals(before, settings.state)
@@ -116,12 +126,66 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
             speed = 0.3f,
             reactToActivity = false,
             pauseOnFocusLoss = false,
-            avoidMouse = false,
+            reactToTyping = false,
+            pointerMode = PointerMode.ATTRACT,
         )
         assertEquals(expected, settings.state)
         assertEquals(1, applyCalls)
         assertEquals(expected, committedStates.single())
         assertFalse(enabled)
+        assertFalse(configurable.isModified())
+    }
+
+    fun `test reduce motion and per-theme presets are edited in the draft until Apply`() {
+        checkBox("reduceMotion").isSelected = true
+        presetCombo("lightEffectId").selectedItem = "rain"
+        presetCombo("darkEffectId").selectedItem = "starfield"
+
+        assertTrue(configurable.isModified())
+        assertEquals(AtmosphereSettingsState.State(), settings.state)
+        assertEquals(0, applyCalls)
+
+        configurable.apply()
+
+        val expected = AtmosphereSettingsState.State(reduceMotion = true, lightEffectId = "rain", darkEffectId = "starfield")
+        assertEquals(expected, settings.state)
+        assertEquals(expected, committedStates.single())
+        assertFalse(configurable.isModified())
+
+        presetCombo("lightEffectId").selectedItem = null
+        assertTrue(configurable.isModified())
+        configurable.apply()
+        assertNull(settings.state.lightEffectId)
+        assertEquals("starfield", settings.state.darkEffectId)
+
+        configurable.reset()
+        assertEquals(null, presetCombo("lightEffectId").selectedItem)
+        assertEquals("starfield", presetCombo("darkEffectId").selectedItem)
+        assertTrue(checkBox("reduceMotion").isSelected)
+    }
+
+    fun `test preset combos offer same-as-above and every effect`() {
+        for (name in listOf("lightEffectId", "darkEffectId")) {
+            val combo = presetCombo(name)
+            val items = (0 until combo.itemCount).map { combo.getItemAt(it) }
+
+            assertEquals(listOf<String?>(null) + AtmosphereEffects.ids, items)
+            assertNull(combo.selectedItem)
+            assertEquals(AtmosphereBundle.message("settings.preset.same"), renderedText(combo, null, 0))
+            items.drop(1).forEachIndexed { index, id ->
+                assertEquals(AtmosphereBundle.message("effect.$id.name"), renderedText(combo, id, index + 1))
+            }
+        }
+    }
+
+    fun `test persisted presets and reduce motion position the controls`() {
+        settings.loadState(AtmosphereSettingsState.State(reduceMotion = true, darkEffectId = "snow"))
+
+        configurable.reset()
+
+        assertTrue(checkBox("reduceMotion").isSelected)
+        assertEquals("snow", presetCombo("darkEffectId").selectedItem)
+        assertNull(presetCombo("lightEffectId").selectedItem)
         assertFalse(configurable.isModified())
     }
 
@@ -141,17 +205,28 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
         assertFalse(configurable.isModified())
     }
 
+    fun `test pointer mode combo offers avoid attract and off with bundle names`() {
+        val combo = pointerModeCombo()
+        val items = (0 until combo.itemCount).map { combo.getItemAt(it) }
+
+        assertEquals(PointerMode.entries, items)
+        assertEquals(PointerMode.AVOID, combo.selectedItem)
+        PointerMode.entries.forEachIndexed { index, mode ->
+            assertEquals(AtmosphereBundle.message("settings.pointerMode.${mode.name}"), renderedText(combo, mode, index))
+        }
+    }
+
     fun `test every Apply persists once and notifies once`() {
-        checkBox("avoidMouse").isSelected = false
+        pointerModeCombo().selectedItem = PointerMode.OFF
         configurable.apply()
         slider("speed").value = 120
         configurable.apply()
 
         assertEquals(2, applyCalls)
         assertEquals(2, committedStates.size)
-        assertFalse(committedStates[0].avoidMouse)
+        assertEquals(PointerMode.OFF, committedStates[0].pointerMode)
         assertEquals(1f, committedStates[0].speed)
-        assertFalse(committedStates[1].avoidMouse)
+        assertEquals(PointerMode.OFF, committedStates[1].pointerMode)
         assertEquals(1.2f, committedStates[1].speed)
         assertEquals(committedStates[1], settings.state)
     }
@@ -243,7 +318,7 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
         slider("intensity").value = 42
         slider("speed").value = 200
         checkBox("reactToActivity").isSelected = false
-        checkBox("avoidMouse").isSelected = false
+        pointerModeCombo().selectedItem = PointerMode.OFF
         checkBox("pauseOnFocusLoss").isSelected = false
         assertTrue(configurable.isModified())
 
@@ -255,7 +330,7 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
         assertEquals(100, slider("intensity").value)
         assertEquals(100, slider("speed").value)
         assertTrue(checkBox("reactToActivity").isSelected)
-        assertTrue(checkBox("avoidMouse").isSelected)
+        assertEquals(PointerMode.AVOID, pointerModeCombo().selectedItem)
         assertTrue(checkBox("pauseOnFocusLoss").isSelected)
         assertEquals(AtmosphereSettingsState.State(), settings.state)
         assertEquals(0, applyCalls)
@@ -263,7 +338,7 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
 
     fun `test live changes made elsewhere mark the page modified until Reset`() {
         val effect = nonDefaultEffect()
-        settings.loadState(AtmosphereSettingsState.State(effectId = effect, speed = 0.5f, avoidMouse = false))
+        settings.loadState(AtmosphereSettingsState.State(effectId = effect, speed = 0.5f, pointerMode = PointerMode.OFF))
         enabled = false
 
         assertTrue(configurable.isModified())
@@ -274,7 +349,7 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
         assertFalse(checkBox("enabled").isSelected)
         assertEquals(effect, effectCombo().selectedItem)
         assertEquals(50, slider("speed").value)
-        assertFalse(checkBox("avoidMouse").isSelected)
+        assertEquals(PointerMode.OFF, pointerModeCombo().selectedItem)
         assertEquals(0, applyCalls)
     }
 
@@ -407,6 +482,8 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
     private fun slider(name: String): JSlider = control(name)
     private fun button(name: String): JButton = control(name)
     private fun effectCombo(): JComboBox<*> = control("effectId")
+    private fun pointerModeCombo(): JComboBox<*> = control("pointerMode")
+    private fun presetCombo(name: String): JComboBox<*> = control(name)
 
     private companion object {
         val CONTROL_NAMES = listOf(
@@ -416,11 +493,15 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
             "intensity",
             "speed",
             "reactToActivity",
+            "reactToTyping",
             "previewSuccess",
             "previewFailure",
             "previewComment",
-            "avoidMouse",
+            "pointerMode",
             "pauseOnFocusLoss",
+            "reduceMotion",
+            "lightEffectId",
+            "darkEffectId",
         )
     }
 }

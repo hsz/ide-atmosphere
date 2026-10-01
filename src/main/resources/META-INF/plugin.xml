@@ -14,19 +14,25 @@
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
     <description><![CDATA[
         A quiet, living layer over your IDE: <em>Fireflies</em> on a summer night, <em>Sakura</em> petals in a spring
-        breeze or softly falling <em>Snow</em>, painted across the whole window &mdash; editor, tool windows, toolbar and
-        status bar &mdash; without ever intercepting input or touching your code.<br><br>
-        The atmosphere lives on the frame's glass pane, adapts to Light and Dark themes, calms down when you are idle
-        and pauses in Power Save mode or when the window is in the background. Particles drift away from your mouse
-        pointer, speed up while the IDE is busy (builds, indexing, runs, Gradle sync), rise for a moment when something
-        succeeds and shiver when something fails.<br><br>
-        Pick an atmosphere and set intensity and speed under <b>Settings | Appearance &amp; Behavior | Atmosphere</b>;
-        toggle it via <b>View | Appearance | Atmosphere</b>.
+        breeze, softly falling <em>Snow</em>, fine <em>Rain</em> or a twinkling <em>Starfield</em>, painted across the
+        whole window &mdash; editor, tool windows, toolbar and status bar &mdash; without ever intercepting input or
+        touching your code.<br><br>
+        The atmosphere lives on the frame's glass pane, adapts to Light and Dark themes (optionally with a different
+        atmosphere for each), calms down when you are idle and pauses in Power Save mode or when the window is in the
+        background. Particles avoid or gather around your mouse pointer and puff away from a click, stir with your
+        typing rhythm, speed up while the IDE is busy (builds, indexing, runs, Gradle sync), rise for a moment when
+        something succeeds &mdash; a passing test run, a commit, a push &mdash; and shiver when something fails.<br><br>
+        Pick an atmosphere and set intensity, speed, pointer mode and Reduce Motion under
+        <b>Settings | Appearance &amp; Behavior | Atmosphere</b>; switch or pause it for an hour from the status bar
+        widget, or toggle it via <b>View | Appearance | Atmosphere</b>.
         ]]></description>
 
     <!-- Product and plugin compatibility requirements.
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html -->
     <depends>com.intellij.modules.platform</depends>
+    <!-- Commit and push reactions load only where version control (and Git) are present. -->
+    <depends optional="true" config-file="ide-atmosphere-vcs.xml">com.intellij.modules.vcs</depends>
+    <depends optional="true" config-file="ide-atmosphere-git.xml">Git4Idea</depends>
 
     <resource-bundle>messages.AtmosphereBundle</resource-bundle>
 
@@ -44,6 +50,11 @@
 
         <externalSystemTaskNotificationListener
                 implementation="info.chrzanowski.ideatmosphere.events.ExternalSystemActivityProducer"/>
+
+        <!-- Status bar quick switch: pick an atmosphere, pause for an hour, open the settings. -->
+        <statusBarWidgetFactory
+                id="info.chrzanowski.ideatmosphere.statusBarWidget"
+                implementation="info.chrzanowski.ideatmosphere.widget.AtmosphereStatusBarWidgetFactory"/>
     </extensions>
 
     <applicationListeners>
@@ -62,6 +73,9 @@
                   topic="com.intellij.openapi.project.DumbService$DumbModeListener"/>
         <listener class="info.chrzanowski.ideatmosphere.events.BuildActivityProducer"
                   topic="com.intellij.task.ProjectTaskListener"/>
+        <!-- Test-run outcome from the test runner's result tree (one SUCCESS / FAILURE per run). -->
+        <listener class="info.chrzanowski.ideatmosphere.events.TestResultActivityProducer"
+                  topic="com.intellij.execution.testframework.sm.runner.SMTRunnerEventsListener"/>
     </projectListeners>
 
     <actions>

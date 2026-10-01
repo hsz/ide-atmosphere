@@ -5,16 +5,20 @@ import com.intellij.mock.MockProject
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.impl.IdeGlassPaneImpl
+import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.util.ui.UIUtil
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
+import info.chrzanowski.ideatmosphere.core.PointerMode
 import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
 import info.chrzanowski.ideatmosphere.effects.fireflies.FirefliesEffect
 import info.chrzanowski.ideatmosphere.effects.sakura.SakuraEffect
 import info.chrzanowski.ideatmosphere.render.DirtyRegionCollector
 import info.chrzanowski.ideatmosphere.settings.AtmosphereSettingsState
 import java.awt.Rectangle
+import java.awt.event.KeyEvent
 import javax.swing.JRootPane
+import kotlin.time.Duration.Companion.milliseconds
 
 class AtmosphereManagerTest : BasePlatformTestCase() {
 
@@ -35,11 +39,16 @@ class AtmosphereManagerTest : BasePlatformTestCase() {
     private lateinit var manager: AtmosphereManager
     private lateinit var first: Frame
     private lateinit var second: Frame
+    private lateinit var originalIsDarkTheme: () -> Boolean
 
     override fun setUp() {
         super.setUp()
         PropertiesComponent.getInstance().unsetValue(AtmosphereManager.ENABLED_KEY)
         manager = AtmosphereManager.getInstance()
+        originalIsDarkTheme = manager.isDarkTheme
+        // Other test classes share the application-level settings; start from the defaults regardless of run order.
+        AtmosphereSettingsState.getInstance().loadState(AtmosphereSettingsState.State())
+        manager.applySettings()
         first = Frame("first")
         second = Frame("second")
     }
@@ -49,9 +58,12 @@ class AtmosphereManagerTest : BasePlatformTestCase() {
             manager.detach(project)
             Disposer.dispose(first.parent)
             Disposer.dispose(second.parent)
+            manager.resumeFromSnooze()
+            manager.isDarkTheme = originalIsDarkTheme
             manager.setApplicationActive(true)
             manager.isEnabled = true
             AtmosphereSettingsState.getInstance().loadState(AtmosphereSettingsState.State())
+            manager.applySettings()
             PropertiesComponent.getInstance().unsetValue(AtmosphereManager.ENABLED_KEY)
             UIUtil.dispatchAllInvocationEvents()
         } finally {
@@ -64,18 +76,234 @@ class AtmosphereManagerTest : BasePlatformTestCase() {
     fun `test cursor avoidance applies immediately independently of activity gating`() {
         val state = AtmosphereSettingsState.getInstance().state
         state.reactToActivity = false
-        state.avoidMouse = false
+        state.pointerMode = PointerMode.OFF
         attachFirst()
         val atmosphere = manager.atmosphereFor(project)!!
-        assertFalse(atmosphere.cursorAvoidanceEnabled)
+        assertEquals(PointerMode.OFF, atmosphere.pointerMode)
+        assertEquals(PointerMode.OFF, first.effect.lastPointerMode)
         assertFalse(atmosphere.isPointerTracking)
-        state.avoidMouse = true
+        state.pointerMode = PointerMode.ATTRACT
         manager.applySettings()
-        assertTrue(atmosphere.cursorAvoidanceEnabled)
+        assertEquals(PointerMode.ATTRACT, atmosphere.pointerMode)
+        assertEquals(PointerMode.ATTRACT, first.effect.lastPointerMode)
         assertTrue(atmosphere.isPointerTracking)
-        state.avoidMouse = false
+        state.pointerMode = PointerMode.OFF
         manager.applySettings()
         assertFalse(atmosphere.isPointerTracking)
+    }
+
+    fun `test reduce motion slows the effect, caps the ticker and drops bursts and gusts`() {
+        attachFirst()
+        val atmosphere = manager.atmosphereFor(project)!!
+        val state = AtmosphereSettingsState.getInstance().state
+        state.speed = 1.5f
+        state.reduceMotion = true
+
+        manager.applySettings()
+
+        assertEquals(AtmosphereSettingsState.REDUCED_MOTION_SPEED, first.effect.lastSpeedScale)
+        assertTrue(atmosphere.reduceMotion)
+        assertTrue(manager.ticker.reduceMotion)
+        assertEquals(100, manager.ticker.intervalMillis)
+        manager.publish(AtmosphereEvent.SUCCESS)
+        manager.publish(AtmosphereEvent.FAILURE)
+        manager.endActivity(project, success = true)
+        manager.previewOutcome(AtmosphereEvent.FAILURE)
+        assertEquals(emptyList<AtmosphereEvent>(), first.effect.events.filter { it == AtmosphereEvent.SUCCESS || it == AtmosphereEvent.FAILURE })
+        manager.publish(AtmosphereEvent.USER_IDLE)
+        assertEquals(AtmosphereEvent.USER_IDLE, first.effect.events.last())
+
+        state.reduceMotion = false
+        manager.applySettings()
+
+        assertEquals(1.5f, first.effect.lastSpeedScale)
+        assertFalse(atmosphere.reduceMotion)
+        assertFalse(manager.ticker.reduceMotion)
+        manager.publish(AtmosphereEvent.SUCCESS)
+        assertEquals(AtmosphereEvent.SUCCESS, first.effect.events.last())
+    }
+
+    fun `test reduce motion applies to frames attached or re-enabled later`() {
+        val state = AtmosphereSettingsState.getInstance().state
+        state.speed = 1.5f
+        state.reduceMotion = true
+        attachFirst()
+        assertEquals(AtmosphereSettingsState.REDUCED_MOTION_SPEED, first.effect.lastSpeedScale)
+        assertTrue(manager.atmosphereFor(project)!!.reduceMotion)
+
+        manager.isEnabled = false
+        manager.isEnabled = true
+        assertEquals(AtmosphereSettingsState.REDUCED_MOTION_SPEED, first.effect.lastSpeedScale)
+        assertTrue(manager.atmosphereFor(project)!!.reduceMotion)
+    }
+
+    fun `test per-theme presets pick the effect of the current theme brightness`() {
+        val state = AtmosphereSettingsState.getInstance().state
+        state.effectId = "fireflies"
+        state.darkEffectId = "snow"
+        state.lightEffectId = "sakura"
+        attachFirst()
+
+        manager.isDarkTheme = { true }
+        manager.applySettings()
+        assertEquals("snow", manager.atmosphereFor(project)!!.effect.id)
+        assertEquals("snow", manager.currentEffectId)
+
+        manager.isDarkTheme = { false }
+        manager.refreshPalette()
+        assertEquals("sakura", manager.atmosphereFor(project)!!.effect.id)
+        assertEquals("sakura", manager.currentEffectId)
+        assertEquals(1, manager.ticker.frameCount)
+
+        manager.isDarkTheme = { true }
+        manager.refreshPalette()
+        assertEquals("snow", manager.atmosphereFor(project)!!.effect.id)
+
+        state.darkEffectId = null
+        manager.isDarkTheme = { true }
+        manager.applySettings()
+        assertEquals("fireflies", manager.atmosphereFor(project)!!.effect.id)
+    }
+
+    fun `test refreshPalette keeps the effect when the theme has no preset`() {
+        attachFirst()
+        val atmosphere = manager.atmosphereFor(project)!!
+
+        manager.isDarkTheme = { false }
+        manager.refreshPalette()
+        manager.isDarkTheme = { true }
+        manager.refreshPalette()
+
+        assertSame(atmosphere, manager.atmosphereFor(project))
+        assertEquals(0, first.effect.stopCount)
+        assertEquals(2, first.effect.palettes.size)
+    }
+
+    fun `test a new frame starts with the effect of the current theme`() {
+        val state = AtmosphereSettingsState.getInstance().state
+        state.darkEffectId = "rain"
+        state.lightEffectId = "starfield"
+        manager.isDarkTheme = { true }
+        val rootPane = first.rootPane
+        val frame = object : com.intellij.openapi.wm.IdeFrame {
+            override fun getStatusBar() = null
+            override fun suggestChildFrameBounds() = Rectangle()
+            override fun getProject() = this@AtmosphereManagerTest.project
+            override fun setFrameTitle(title: String?) {}
+            override fun getBalloonLayout(): com.intellij.ui.BalloonLayout? = null
+            override fun getComponent() = rootPane
+        }
+
+        manager.attach(project, frame, first.parent)
+
+        assertEquals("rain", manager.atmosphereFor(project)!!.effect.id)
+    }
+
+    fun `test setEffectId writes the preset of the current brightness when one exists`() {
+        val state = AtmosphereSettingsState.getInstance().state
+        state.effectId = "fireflies"
+        state.darkEffectId = "snow"
+        attachFirst()
+
+        manager.isDarkTheme = { true }
+        manager.setEffectId("rain")
+        assertEquals("rain", state.darkEffectId)
+        assertEquals("fireflies", state.effectId)
+        assertNull(state.lightEffectId)
+        assertEquals("rain", manager.atmosphereFor(project)!!.effect.id)
+
+        manager.isDarkTheme = { false }
+        manager.setEffectId("starfield")
+        assertEquals("starfield", state.effectId)
+        assertEquals("rain", state.darkEffectId)
+        assertNull(state.lightEffectId)
+        assertEquals("starfield", manager.atmosphereFor(project)!!.effect.id)
+    }
+
+    fun `test snooze freezes the animation and resume restarts it`() {
+        attachFirst()
+        val atmosphere = manager.atmosphereFor(project)!!
+        assertFalse(manager.isSnoozed)
+        assertTrue(manager.ticker.isRunning)
+
+        manager.snooze()
+
+        assertTrue(manager.isSnoozed)
+        assertTrue(manager.isPaused)
+        assertTrue(atmosphere.paused)
+        assertFalse(manager.ticker.isRunning)
+        assertTrue(manager.snoozeEndsAtMillis > System.currentTimeMillis() + 59 * 60 * 1000L)
+
+        manager.resumeFromSnooze()
+
+        assertFalse(manager.isSnoozed)
+        assertFalse(manager.isPaused)
+        assertFalse(atmosphere.paused)
+        assertTrue(manager.ticker.isRunning)
+        assertEquals(0L, manager.snoozeEndsAtMillis)
+    }
+
+    fun `test snooze lasts one hour by default and is independent of power save`() {
+        assertEquals(1L, AtmosphereManager.SNOOZE_DURATION.inWholeHours)
+        attachFirst()
+        manager.setPaused(AtmosphereManager.PauseReason.POWER_SAVE, true)
+        manager.snooze()
+
+        manager.resumeFromSnooze()
+        assertTrue(manager.isPaused)
+        assertFalse(manager.ticker.isRunning)
+
+        manager.setPaused(AtmosphereManager.PauseReason.POWER_SAVE, false)
+        assertFalse(manager.isPaused)
+        assertTrue(manager.ticker.isRunning)
+    }
+
+    fun `test snooze resumes by itself after its duration`() {
+        attachFirst()
+
+        manager.snooze(100.milliseconds)
+        assertTrue(manager.isSnoozed)
+        PlatformTestUtil.waitWithEventsDispatching("Snooze did not end", { !manager.isSnoozed }, 10)
+
+        assertFalse(manager.isPaused)
+        assertTrue(manager.ticker.isRunning)
+    }
+
+    fun `test snoozing again restarts the countdown and a new snooze outlives the old one`() {
+        attachFirst()
+
+        manager.snooze(50.milliseconds)
+        manager.snooze()
+        val deadline = System.currentTimeMillis() + 300
+        while (System.currentTimeMillis() < deadline) {
+            UIUtil.dispatchAllInvocationEvents()
+            Thread.sleep(10)
+        }
+
+        assertTrue(manager.isSnoozed)
+        assertFalse(manager.ticker.isRunning)
+    }
+
+    fun `test change listeners hear about effect, snooze and settings changes until disposed`() {
+        attachFirst()
+        val listenerParent = Disposer.newDisposable("AtmosphereManagerTest.listener")
+        var calls = 0
+        manager.addChangeListener(listenerParent) { calls++ }
+
+        manager.setEffectId("snow")
+        assertEquals(1, calls)
+        manager.snooze()
+        assertEquals(2, calls)
+        manager.resumeFromSnooze()
+        assertEquals(3, calls)
+        manager.applySettings()
+        assertEquals(4, calls)
+        manager.refreshPalette()
+        assertEquals(5, calls)
+
+        Disposer.dispose(listenerParent)
+        manager.setEffectId("fireflies")
+        assertEquals(5, calls)
     }
 
     fun `test explicit outcome previews ignore activity gating and only play outcomes`() {
@@ -499,6 +727,88 @@ class AtmosphereManagerTest : BasePlatformTestCase() {
         fireflies.onEvent(AtmosphereEvent.ACTIVITY_STARTED)
         fireflies.update(5f, Rectangle(0, 0, 800, 600), DirtyRegionCollector(100))
         assertEquals(FirefliesEffect.ACTIVITY_SPEED, fireflies.speedMultiplier, 0.001f)
+    }
+
+    fun `test typing producer runs while enabled with a registered frame and follows the toggles`() {
+        assertFalse(manager.isTypingProducerRunning)
+        attachFirst()
+        assertTrue(manager.isTypingProducerRunning)
+
+        manager.isEnabled = false
+        assertFalse(manager.isTypingProducerRunning)
+        manager.isEnabled = true
+        assertTrue(manager.isTypingProducerRunning)
+
+        val state = AtmosphereSettingsState.getInstance().state
+        state.reactToTyping = false
+        manager.applySettings()
+        assertFalse(manager.isTypingProducerRunning)
+        state.reactToTyping = true
+        manager.applySettings()
+        assertTrue(manager.isTypingProducerRunning)
+
+        state.reactToActivity = false
+        manager.applySettings()
+        assertFalse("typing is one of the activity reactions", manager.isTypingProducerRunning)
+        state.reactToActivity = true
+        manager.applySettings()
+        assertTrue(manager.isTypingProducerRunning)
+
+        manager.detach(project)
+        assertFalse(manager.isTypingProducerRunning)
+    }
+
+    fun `test keystrokes raise the flow of every frame and it settles back to zero`() {
+        attachFirst()
+        val secondProject = MockProject(null, second.parent)
+        manager.attach(secondProject, second.rootPane, second.parent, second.effect)
+        assertEquals(0f, manager.flowLevel)
+
+        // Observed like any key press the toolkit reports; the event itself is untouched.
+        val key = KeyEvent(first.rootPane, KeyEvent.KEY_PRESSED, System.currentTimeMillis(), 0, KeyEvent.VK_A, 'a')
+        manager.observeKeyForTest(key)
+        assertFalse(key.isConsumed)
+        assertTrue(manager.flowLevel > 0f)
+        assertEquals(manager.flowLevel, first.effect.lastFlow)
+        assertEquals(manager.flowLevel, second.effect.lastFlow)
+
+        // Modifier keys and releases alone are not typing.
+        val before = manager.flowLevel
+        manager.observeKeyForTest(KeyEvent(first.rootPane, KeyEvent.KEY_PRESSED, System.currentTimeMillis(), 0, KeyEvent.VK_SHIFT, KeyEvent.CHAR_UNDEFINED))
+        manager.observeKeyForTest(KeyEvent(first.rootPane, KeyEvent.KEY_RELEASED, System.currentTimeMillis(), 0, KeyEvent.VK_A, 'a'))
+        assertEquals(before, manager.flowLevel)
+
+        // The decay poll brings it back to zero and forwards the final zero.
+        PlatformTestUtil.waitWithEventsDispatching("flow did not settle", { manager.flowLevel == 0f }, 15)
+        assertEquals(0f, first.effect.lastFlow)
+        assertEquals(0f, second.effect.lastFlow)
+        assertTrue(first.effect.flows.zipWithNext().all { (a, b) -> b <= a })
+    }
+
+    fun `test disabling typing reactions resets the flow and reduce motion keeps the effect at zero flow`() {
+        attachFirst()
+        manager.setFlow(0.7f)
+        assertEquals(0.7f, first.effect.lastFlow)
+
+        val state = AtmosphereSettingsState.getInstance().state
+        state.reduceMotion = true
+        manager.applySettings()
+        assertEquals("reduce motion zeroes the flow immediately", 0f, first.effect.lastFlow)
+        manager.setFlow(0.9f)
+        assertEquals(0f, first.effect.lastFlow)
+        state.reduceMotion = false
+        manager.applySettings()
+        manager.setFlow(0.9f)
+        assertEquals(0.9f, first.effect.lastFlow)
+
+        manager.observeKeyForTest(KeyEvent(first.rootPane, KeyEvent.KEY_PRESSED, System.currentTimeMillis(), 0, KeyEvent.VK_B, 'b'))
+        assertTrue(manager.flowLevel > 0f)
+        state.reactToTyping = false
+        manager.applySettings()
+        assertEquals(0f, manager.flowLevel)
+        assertEquals(0f, first.effect.lastFlow)
+        manager.observeKeyForTest(KeyEvent(first.rootPane, KeyEvent.KEY_PRESSED, System.currentTimeMillis(), 0, KeyEvent.VK_B, 'b'))
+        assertEquals("not observing while switched off", 0f, manager.flowLevel)
     }
 
     fun `test reactToActivity=false stops the idle producer`() {

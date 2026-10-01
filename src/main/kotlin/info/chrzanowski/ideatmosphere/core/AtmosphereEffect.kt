@@ -53,6 +53,15 @@ interface AtmosphereEffect {
     fun onPointerChanged(x: Float, y: Float, inside: Boolean) {}
 
     /**
+     * A mouse button was pressed at root-pane coordinates (`x`, `y`); the event itself is neither received nor
+     * consumed. Effects typically puff nearby particles outward. Default no-op; must not allocate.
+     */
+    fun onPointerPressed(x: Float, y: Float) {}
+
+    /** Switches how particles react to the pointer (avoid, attract, ignore). Default no-op. */
+    fun setPointerMode(mode: PointerMode) {}
+
+    /**
      * Updates the intensity of the effect.
      * @param scale Expected in roughly [0.3, 2.0], where 1.0 is the default.
      * Effects should apply this scale (e.g. to particle count or opacity) without allocating
@@ -66,4 +75,15 @@ interface AtmosphereEffect {
      * Effects should multiply their baseline speed by this scale.
      */
     fun setSpeedScale(scale: Float) {}
+
+    /**
+     * Typing flow in `0..1`: `0` at rest, `1` while typing fast. A continuous value rather than an event so effects
+     * are not spammed per keystroke; they typically stir a little faster (see [FLOW_SPEED_BOOST]). Default no-op.
+     */
+    fun setFlow(level: Float) {}
+
+    companion object {
+        /** Fraction added to the speed at full typing flow (`setFlow(1f)` runs 1.5× the configured speed). */
+        const val FLOW_SPEED_BOOST: Float = 0.5f
+    }
 }

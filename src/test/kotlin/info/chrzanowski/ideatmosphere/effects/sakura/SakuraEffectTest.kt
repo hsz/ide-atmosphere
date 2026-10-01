@@ -2,6 +2,7 @@ package info.chrzanowski.ideatmosphere.effects.sakura
 
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
 import info.chrzanowski.ideatmosphere.core.AtmospherePalette
+import info.chrzanowski.ideatmosphere.core.CommitPolicy
 import info.chrzanowski.ideatmosphere.core.EffectContext
 import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
 import info.chrzanowski.ideatmosphere.render.DirtyRegionCollector
@@ -82,22 +83,107 @@ class SakuraEffectTest {
     }
 
     @Test
-    fun `dirty reporting is continuous with a small epsilon`() {
+    fun `adaptive commit reports at most one region per petal per tick`() {
         val effect = started()
         val bounds = Rectangle(0, 0, 800, 600)
         simulate(effect, bounds, 3f)
 
         val dirty = newCollector()
-        assertTrue(effect.update(1f / 30f, bounds, dirty))
-        assertTrue(dirty.size >= effect.particleCount - 2)
-
         var reported = 0
-        repeat(10) {
+        val ticks = 300
+        repeat(ticks) {
+            dirty.clear()
+            effect.update(1f / 30f, bounds, dirty)
+            assertTrue(dirty.size <= effect.particleCount)
+            reported += dirty.size
+        }
+        val ratio = reported.toDouble() / (ticks * effect.particleCount)
+        // Petals fall at 15-35 px/s (0.5-1.2 px per 1/30 s tick, above the 0.4 px threshold), so at full frame rate
+        // every visible petal is committed on every tick; skipping only kicks in for slower ticks and calm motion.
+        assertTrue("commit ratio was $ratio", ratio <= 1.0)
+        assertTrue("moving petals must still be reported, got $reported", reported > ticks)
+    }
+
+    @Test
+    fun `a large tick commits every moving petal while hiccup ticks report nothing`() {
+        val effect = started()
+        val bounds = Rectangle(0, 0, 800, 600)
+        simulate(effect, bounds, 3f)
+
+        val dirty = newCollector()
+        assertTrue(effect.update(0.1f, bounds, dirty))
+        assertTrue(
+            "expected nearly every petal dirty on a large tick, got ${dirty.size}/${effect.particleCount}",
+            dirty.size >= effect.particleCount - 2,
+        )
+
+        // Tiny ticks move and turn petals by far less than the commit threshold (until the staleness bound).
+        var reported = 0
+        repeat(CommitPolicy.MAX_STALE_TICKS - 1) {
             dirty.clear()
             effect.update(0.0001f, bounds, dirty)
             reported += dirty.size
         }
-        assertTrue("expected almost no dirty regions for tiny changes, got $reported", reported <= 15)
+        assertTrue("expected almost no dirty regions for tiny changes, got $reported", reported <= 3)
+    }
+
+    @Test
+    fun `un-committed motion and rotation stay below the threshold and are committed within the staleness bound`() {
+        val effect = started()
+        val bounds = Rectangle(0, 0, 800, 600)
+        simulate(effect, bounds, 3f)
+        val x = floats(effect, "x")
+        val y = floats(effect, "y")
+        val rotation = floats(effect, "rotation")
+        val size = floats(effect, "size")
+        val prevX = floats(effect, "prevX")
+        val prevY = floats(effect, "prevY")
+        val prevRotation = floats(effect, "prevRotation")
+
+        val dirty = newCollector()
+        val stale = IntArray(effect.particleCount)
+        repeat(300) {
+            dirty.clear()
+            effect.update(1f / 30f, bounds, dirty)
+            for (i in 0 until effect.particleCount) {
+                val dx = abs(x[i] - prevX[i])
+                val dy = abs(y[i] - prevY[i])
+                val turn = abs(rotation[i] - prevRotation[i]) * size[i]
+                val limit = CommitPolicy.MOVE_THRESHOLD
+                assertTrue("petal $i is $dx,$dy px (turn $turn) away from its painted state", dx < limit && dy < limit && turn < limit)
+                if (dx == 0f && dy == 0f && turn == 0f) {
+                    stale[i] = 0
+                } else {
+                    stale[i]++
+                    assertTrue("petal $i went ${stale[i]} ticks without a repaint", stale[i] <= CommitPolicy.MAX_STALE_TICKS)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `adaptive commit keeps the screen covered by reported regions over many ticks`() {
+        val effect = started()
+        val bounds = Rectangle(0, 0, 400, 300)
+        simulate(effect, bounds, 2f)
+        var visibleChanges = 0
+        repeat(60) {
+            val before = paint(effect, bounds, bounds)
+            val dirty = newCollector()
+            effect.update(1f / 30f, bounds, dirty)
+            val after = paint(effect, bounds, bounds)
+            val merged = ArrayList<Rectangle>()
+            dirty.merge(bounds) { merged.add(Rectangle(it)) }
+            for (yy in 0 until bounds.height) {
+                for (xx in 0 until bounds.width) {
+                    if (before.getRGB(xx, yy) != after.getRGB(xx, yy)) {
+                        assertTrue("changed pixel ($xx,$yy) is not covered by a dirty rect", merged.any { it.contains(xx, yy) })
+                    }
+                }
+            }
+            if (merged.isNotEmpty()) visibleChanges++
+        }
+        assertTrue("the screen must keep changing", visibleChanges > 10)
     }
 
     @Test

@@ -2,6 +2,7 @@ package info.chrzanowski.ideatmosphere.effects.fireflies
 
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
 import info.chrzanowski.ideatmosphere.core.AtmospherePalette
+import info.chrzanowski.ideatmosphere.core.CommitPolicy
 import info.chrzanowski.ideatmosphere.core.EffectContext
 import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
 import info.chrzanowski.ideatmosphere.render.DirtyRegionCollector
@@ -90,34 +91,110 @@ class FirefliesEffectTest {
     }
 
     @Test
-    fun `dirty reporting is continuous with a small epsilon`() {
+    fun `adaptive commit reports fewer regions than committing every particle on every tick`() {
         val effect = started()
         val bounds = Rectangle(0, 0, 800, 600)
         simulate(effect, bounds, 3f)
 
-        // A 1/30 s tick moves every cruising firefly by 0.2-0.6 px (>= MOVE_EPSILON), so nearly all are dirty.
         val dirty = newCollector()
-        assertTrue(effect.update(1f / 30f, bounds, dirty))
+        var reported = 0
+        val ticks = 300
+        repeat(ticks) {
+            dirty.clear()
+            effect.update(1f / 30f, bounds, dirty)
+            reported += dirty.size
+        }
+        val ratio = reported.toDouble() / (ticks * effect.particleCount)
+        assertTrue("slow fireflies must skip ticks, commit ratio was $ratio", ratio <= 0.8)
+        assertTrue("moving fireflies must still be reported, got $reported", reported > ticks)
+    }
+
+    @Test
+    fun `a large tick commits every moving particle while hiccup ticks report nothing`() {
+        val effect = started()
+        val bounds = Rectangle(0, 0, 800, 600)
+        simulate(effect, bounds, 3f)
+
+        // A clamped 0.1 s tick moves every cruising firefly by >= 0.6 px (> MOVE_THRESHOLD), so nearly all are dirty.
+        val dirty = newCollector()
+        assertTrue(effect.update(0.1f, bounds, dirty))
         assertTrue(
-            "expected nearly every particle dirty on a normal tick, got ${dirty.size}/${effect.particleCount}",
+            "expected nearly every particle dirty on a large tick, got ${dirty.size}/${effect.particleCount}",
             dirty.size >= effect.particleCount - 2,
         )
 
-        // A 0.1 ms tick moves a particle by at most 0.002 px and changes alpha by far less than one 8-bit step,
-        // so (almost) nothing needs repainting.
+        // A 0.1 ms tick moves a particle by at most 0.002 px and changes alpha by far less than the commit
+        // threshold, so (almost) nothing needs repainting (until the staleness bound of 4 ticks is reached).
         var reported = 0
-        repeat(10) {
+        repeat(CommitPolicy.MAX_STALE_TICKS - 1) {
             dirty.clear()
             effect.update(0.0001f, bounds, dirty)
             reported += dirty.size
         }
         assertTrue("expected almost no dirty regions for invisible changes, got $reported", reported <= 2)
+    }
 
-        // Sub-epsilon motion accumulates in `x/y` while `prev*` (on-screen state) stays put, and is reported
-        // once the accumulated displacement becomes visible.
-        dirty.clear()
-        assertTrue(effect.update(1f / 30f, bounds, dirty))
-        assertTrue(dirty.size >= effect.particleCount - 2)
+    @Test
+    fun `un-committed motion stays below the threshold and is committed within the staleness bound`() {
+        val effect = started()
+        val bounds = Rectangle(0, 0, 800, 600)
+        simulate(effect, bounds, 3f)
+        val x = floats(effect, "x")
+        val y = floats(effect, "y")
+        val prevX = floats(effect, "prevX")
+        val prevY = floats(effect, "prevY")
+
+        val dirty = newCollector()
+        var skipped = 0
+        val stale = IntArray(effect.particleCount)
+        repeat(300) {
+            dirty.clear()
+            effect.update(1f / 30f, bounds, dirty)
+            for (i in 0 until effect.particleCount) {
+                val dx = abs(x[i] - prevX[i])
+                val dy = abs(y[i] - prevY[i])
+                assertTrue("particle $i is $dx,$dy px away from its painted state", dx < CommitPolicy.MOVE_THRESHOLD && dy < CommitPolicy.MOVE_THRESHOLD)
+                if (dx == 0f && dy == 0f) {
+                    stale[i] = 0
+                } else {
+                    stale[i]++
+                    skipped++
+                    assertTrue("particle $i went ${stale[i]} ticks without a repaint", stale[i] <= CommitPolicy.MAX_STALE_TICKS)
+                }
+            }
+        }
+        assertTrue("some particles must have skipped ticks", skipped > 0)
+    }
+
+    @Test
+    fun `adaptive commit keeps the screen covered by reported regions over many ticks`() {
+        val effect = started()
+        val bounds = Rectangle(0, 0, 400, 300)
+        simulate(effect, bounds, 2f)
+        var visibleChanges = 0
+        repeat(60) {
+            val before = paint(effect, bounds, bounds)
+            val dirty = newCollector()
+            effect.update(1f / 30f, bounds, dirty)
+            val after = paint(effect, bounds, bounds)
+            val merged = ArrayList<Rectangle>()
+            dirty.merge(bounds) { merged.add(Rectangle(it)) }
+            for (yy in 0 until before.height) {
+                for (xx in 0 until before.width) {
+                    if (before.getRGB(xx, yy) != after.getRGB(xx, yy)) {
+                        assertTrue("changed pixel ($xx,$yy) is not covered by a dirty rect", merged.any { it.contains(xx, yy) })
+                    }
+                }
+            }
+            if (merged.isNotEmpty()) visibleChanges++
+        }
+        assertTrue("the screen must keep changing", visibleChanges > 10)
+    }
+
+    private fun floats(effect: FirefliesEffect, name: String): FloatArray {
+        val field = FirefliesEffect::class.java.getDeclaredField(name)
+        field.isAccessible = true
+        return field.get(effect) as FloatArray
     }
 
     @Test

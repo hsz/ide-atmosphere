@@ -22,12 +22,14 @@ import kotlin.math.min
  * paints of a fade would otherwise drag the rate down for the next seconds. When every attached frame is dormant
  * after a tick, [onAllDormant] is invoked once so the owner can stop the timer; it is re-armed as soon as a tick
  * finds a non-dormant frame again.
+ * [reduceMotion] additionally caps the rate at [reducedFps] (default 10 FPS) for the Reduce Motion setting.
  * All methods are EDT-only.
  */
 class AtmosphereTicker(
     val governor: FrameBudgetGovernor = FrameBudgetGovernor(),
     val stats: AtmosphereStats = AtmosphereStats(),
     private val calmFps: Int = 15,
+    private val reducedFps: Int = 10,
     private val clock: () -> Long = System::nanoTime,
 ) {
 
@@ -58,9 +60,22 @@ class AtmosphereTicker(
             applyInterval()
         }
 
+    /** Reduce Motion: caps the governed rate at [reducedFps]; takes effect on the next tick. */
+    var reduceMotion: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            applyInterval()
+        }
+
     /** Effective timer delay in milliseconds. */
     val intervalMillis: Int
-        get() = if (calm) max(governor.intervalMillis, 1000 / calmFps) else governor.intervalMillis
+        get() {
+            var interval = governor.intervalMillis
+            if (calm) interval = max(interval, 1000 / calmFps)
+            if (reduceMotion) interval = max(interval, 1000 / reducedFps)
+            return interval
+        }
 
     fun add(frame: FrameAtmosphere) {
         if (!frames.contains(frame)) frames.add(frame)

@@ -1,0 +1,8 @@
+<!-- Loaded only when the Git integration (Git4Idea) is installed and enabled. -->
+<idea-plugin>
+    <projectListeners>
+        <!-- Push outcome: SUCCESS when the push landed, FAILURE when it was rejected or errored. -->
+        <listener class="info.chrzanowski.ideatmosphere.events.GitPushActivityProducer"
+                  topic="git4idea.push.GitPushListener"/>
+    </projectListeners>
+</idea-plugin>

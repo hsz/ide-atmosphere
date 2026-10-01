@@ -4,8 +4,10 @@ import info.chrzanowski.ideatmosphere.core.AdsrEnvelope
 import info.chrzanowski.ideatmosphere.core.AtmosphereEffect
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
 import info.chrzanowski.ideatmosphere.core.AtmospherePalette
+import info.chrzanowski.ideatmosphere.core.CommitPolicy
 import info.chrzanowski.ideatmosphere.core.CursorAvoidance
 import info.chrzanowski.ideatmosphere.core.EffectContext
+import info.chrzanowski.ideatmosphere.core.PointerMode
 import info.chrzanowski.ideatmosphere.render.DirtyRegionCollector
 import java.awt.Color
 import java.awt.Graphics2D
@@ -38,8 +40,11 @@ import kotlin.math.sqrt
  * Particles are stored as structure-of-arrays so [update] and [paint] never allocate: the only shape is a
  * single reused [Ellipse2D.Float] and colors come from an [ALPHA_STEPS]-entry alpha table rebuilt only in
  * [start] and [onPaletteChanged]. Rendering is continuous (float centre and radius, antialiased with
- * `STROKE_PURE` by the caller) and so is dirty reporting: a flake is reported once it has moved by at least
- * [MOVE_EPSILON] px or its 8-bit alpha step changed.
+ * `STROKE_PURE` by the caller). Dirty reporting is adaptive ([CommitPolicy]): the simulation runs on every tick,
+ * but a flake is *committed* (reported and repainted) only once its on-screen state would visibly change — it
+ * moved by [CommitPolicy.MOVE_THRESHOLD] px, its alpha changed by [CommitPolicy.ALPHA_STEP_THRESHOLD] of
+ * [ALPHA_STEPS] steps, or it has been stale for [CommitPolicy.MAX_STALE_TICKS] ticks. Slow, far flakes therefore
+ * skip ticks while fast ones are repainted on every tick.
  *
  * Invariant (shared with `FirefliesEffect`): `prevX/prevY/prevAlpha` are the **on-screen** state. [paint]
  * draws from them and they advance only when a region covering both the old and the new flake (padded by
@@ -60,6 +65,8 @@ class SnowEffect : AtmosphereEffect {
 
     private var intensity: Float = 1f
     private var speedScale: Float = 1f
+    /** Typing-flow gain on top of [speedScale]: `1` at rest, up to `1 + FLOW_SPEED_BOOST` while typing fast. */
+    private var flowBoost: Float = 1f
     private var populationChanged = false
 
     private val x = FloatArray(MAX_PARTICLES)
@@ -83,6 +90,9 @@ class SnowEffect : AtmosphereEffect {
     private val prevX = FloatArray(MAX_PARTICLES)
     private val prevY = FloatArray(MAX_PARTICLES)
     private val prevAlpha = FloatArray(MAX_PARTICLES)
+
+    // Ticks since the flake was last committed (reported dirty); bounds how long motion may stay un-painted.
+    private val staleTicks = IntArray(MAX_PARTICLES)
 
     private val colors = arrayOfNulls<Color>(ALPHA_STEPS)
     private var colorTableRebuilds = 0
@@ -159,7 +169,7 @@ class SnowEffect : AtmosphereEffect {
         updraftEnvelope.advance(100f)
         gustEnvelope.release()
         gustEnvelope.advance(100f)
-        speedMultiplier = speedEnvelope.value * speedScale
+        speedMultiplier = speedEnvelope.value * speedScale * flowBoost
         glow = 0f
         failureGlow = 0f
         started = true
@@ -193,11 +203,24 @@ class SnowEffect : AtmosphereEffect {
 
     override fun setSpeedScale(scale: Float) {
         speedScale = if (scale.isFinite()) scale.coerceIn(0.3f, 2f) else 1f
-        speedMultiplier = speedEnvelope.value * speedScale
+        speedMultiplier = speedEnvelope.value * speedScale * flowBoost
+    }
+
+    override fun setFlow(level: Float) {
+        flowBoost = 1f + AtmosphereEffect.FLOW_SPEED_BOOST * (if (level.isFinite()) level.coerceIn(0f, 1f) else 0f)
+        speedMultiplier = speedEnvelope.value * speedScale * flowBoost
     }
 
     override fun onPointerChanged(x: Float, y: Float, inside: Boolean) {
         avoidance.setPointer(x, y, inside)
+    }
+
+    override fun onPointerPressed(x: Float, y: Float) {
+        avoidance.burst(x, y, uiScale, particleCount, this.x, this.y)
+    }
+
+    override fun setPointerMode(mode: PointerMode) {
+        avoidance.mode = mode
     }
 
     override fun onEvent(event: AtmosphereEvent) {
@@ -235,7 +258,7 @@ class SnowEffect : AtmosphereEffect {
         }
 
         // Smooth global modifiers.
-        speedMultiplier = speedEnvelope.advance(deltaSeconds) * speedScale
+        speedMultiplier = speedEnvelope.advance(deltaSeconds) * speedScale * flowBoost
         glow = updraftEnvelope.advance(deltaSeconds)
         failureGlow = gustEnvelope.advance(deltaSeconds)
 
@@ -284,10 +307,11 @@ class SnowEffect : AtmosphereEffect {
             val twinkle = 1f - TWINKLE_DEPTH * (1f - d) * (0.5f + 0.5f * sin(twinklePhase[i]))
             alpha[i] = min(1f, baseAlpha[i] * alphaScale * fadeIn[i] * twinkle) * dim
 
-            val moved = abs(x[i] - prevX[i]) >= MOVE_EPSILON || abs(y[i] - prevY[i]) >= MOVE_EPSILON
-            val faded = alphaIndex(alpha[i]) != alphaIndex(prevAlpha[i])
-            if (moved || faded) {
+            val alphaDelta = abs(alphaIndex(alpha[i]) - alphaIndex(prevAlpha[i]))
+            if (CommitPolicy.shouldCommit(x[i] - prevX[i], y[i] - prevY[i], alphaDelta, staleTicks[i])) {
                 changed = emitDirty(dirty, bounds, i, r + 1f) or changed
+            } else {
+                staleTicks[i]++
             }
         }
         return changed
@@ -351,6 +375,7 @@ class SnowEffect : AtmosphereEffect {
         prevX[index] = px
         prevY[index] = py
         prevAlpha[index] = alpha
+        staleTicks[index] = 0
     }
 
     /** Number of populated entries in the cached color table; test seam. */
@@ -418,6 +443,7 @@ class SnowEffect : AtmosphereEffect {
         vy[i] = 0f
         fadeIn[i] = 0f
         alpha[i] = 0f
+        staleTicks[i] = 0
     }
 
     /**
@@ -434,6 +460,7 @@ class SnowEffect : AtmosphereEffect {
         prevX[i] = x[i]
         prevY[i] = y[i]
         prevAlpha[i] = alpha[i]
+        staleTicks[i] = 0
         if (!visible || !intersects(bounds, minX, minY, maxX, maxY)) return false
         dirty.add(minX, minY, maxX - minX, maxY - minY)
         return true
@@ -451,6 +478,7 @@ class SnowEffect : AtmosphereEffect {
         prevX[i] = x[i]
         prevY[i] = y[i]
         prevAlpha[i] = 0f
+        staleTicks[i] = 0
         return visible
     }
 
@@ -533,9 +561,6 @@ class SnowEffect : AtmosphereEffect {
          * also the alpha resolution of dirty reporting.
          */
         const val ALPHA_STEPS: Int = 256
-
-        /** Minimum displacement (user px) that counts as a visible move and triggers a dirty region. */
-        const val MOVE_EPSILON: Float = 0.02f
 
         /** Flake color on dark themes: cold white. */
         @Suppress("UseJBColor")

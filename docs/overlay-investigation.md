@@ -400,7 +400,7 @@ position, and the hops were whole Retina-doubled pixels.
 pause on deactivation):
 
 - `FirefliesEffect` renders a reused `Ellipse2D.Float` at float centres and radii (the painter's `STROKE_PURE` makes
-  the geometry sub-pixel), reports a region for every visible move (`MOVE_EPSILON = 0.02 px`, 256 alpha steps) with
+  the geometry sub-pixel), reports a region for every visible move (`MOVE_EPSILON = 0.02 px`, 256 alpha steps; superseded by the adaptive commit of §13) with
   per-particle padding; the `AtmosphereEffect` contract is unchanged.
 - `DirtyRegionCollector` recalibrated for per-particle rectangles: fixed cost 300 → 120 µs, grid 12×8, no forced
   rectangle cap; unions happen only where cheaper than two paints.
@@ -500,3 +500,42 @@ Final numbers with the new constants (steady state, project loaded):
 | **Background** | 0 | - | - | - | 0 % |
 
 **Conclusion on goals:** The original ≤ 3 % idle aspiration is **not met** (estimated ≈ 7 %). The dominant cost remains the fixed Swing overhead of the nested `paintImmediately` calls and the area repaints. However, the recalibration successfully reduced the rectangle count per tick by ≈ 60 % (from 12.4 to 4.9) and stabilized the active-user cost at the 10 % budget ceiling while maintaining smooth motion.
+
+## 13. Adaptive commit
+
+### 13.1 Rationale
+
+§10.3 and §12 showed that a tick costs ≈ 0.45–0.58 ms **per dirty rectangle** (every nested `paintImmediately` re-renders the IDE components beneath the particle), while the particle math is negligible. Until now `SnowEffect`, `FirefliesEffect` and `SakuraEffect` reported a particle as soon as it had moved `MOVE_EPSILON = 0.02 px` or its alpha changed by one of 256 steps, so on a normal tick almost every particle was dirty — even when it had moved 0.1 px (≈ 0.2 device px on Retina), which is invisible.
+
+The painting rate of a particle should depend on how far it has moved, not on the timer rate.
+
+### 13.2 Design
+
+The simulation still runs on every tick; a particle is only **committed** (reported dirty and its painted `prev*` state advanced) when the shared `core/CommitPolicy` says its on-screen state would visibly change:
+
+| Constant | Value | Meaning |
+| :--- | :---: | :--- |
+| `MOVE_THRESHOLD` | 0.4 user px | ≈ 0.8 device px on a 2× display, 0.4 on 1× |
+| `ALPHA_STEP_THRESHOLD` | 3 of 256 steps | invisible below; fades and fireflies' pulse still step smoothly |
+| `MAX_STALE_TICKS` | 4 | any pending change is committed after at most 4 skipped ticks |
+
+The on-screen-state invariant is untouched: `prevX/prevY/prevAlpha` (and `prevRotation` for petals) advance only inside `emitDirty`/`emitVanish`, which report `prev ∪ new`, so un-committed motion simply accumulates and nothing ghosts. Each effect keeps a per-particle `staleTicks` counter (reset on commit, vanish and spawn). Sakura treats `Δrotation × size` as additional displacement. Respawn/vanish and population changes are unchanged.
+
+`FrameBudgetGovernor`'s default budget was lowered from 100 000 to 70 000 µs/s (≈ 7 % of one core) so a busy IDE sheds load sooner, while the cheaper ticks keep the quiet case at 30 FPS. `AtmosphereStats` now prints absolute `rects/s` next to `rects/tick`, so before/after can be compared on the same frame.
+
+### 13.3 Expected savings (simulation, 1512×909, 30 s)
+
+Rectangles reported per tick (default intensity), measured with the unit-test simulation rather than in the IDE:
+
+| Effect | Particles | Before (every moving particle) | After @ 30 FPS | After @ 20 FPS |
+| :--- | :---: | :---: | :---: | :---: |
+| Fireflies | 20 | ≈ 20 | ≈ 11 (-45 %) | ≈ 15 |
+| Snow | 45 | ≈ 45 | ≈ 40 (-12 %) | ≈ 43 |
+| Sakura | 15 | 15 | 15 (no change) | 15 |
+
+Particles faster than `MOVE_THRESHOLD × fps` px/s are committed on every tick by design (Sakura petals fall at 15–35 px/s ≈ 0.5–1.2 px/tick at 30 FPS; most snow flakes at 6–40 px/s), so the saving is largest for slow, twinkling particles (fireflies, far snow). Larger savings would need a larger threshold, which is limited by the ≈ 0.7 device px hop requirement on HiDPI displays.
+
+### 13.4 Verification status
+
+Unit tests cover the policy (`CommitPolicyTest`), the reported/painted invariant over many ticks, the staleness bound and the reduced commit ratio for every effect. **To be confirmed in a `runIde` session:** the final threshold values (0.4 px / staleness 4) and the real before/after `rects/s` and `cpu≈` figures from the stats line (`-Dide.atmosphere.debug=true`).
+

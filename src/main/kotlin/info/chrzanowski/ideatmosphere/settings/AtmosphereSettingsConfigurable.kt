@@ -1,12 +1,14 @@
 package info.chrzanowski.ideatmosphere.settings
 
 import com.intellij.openapi.options.Configurable
+import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.DialogPanel
 import com.intellij.ui.dsl.builder.*
 import com.intellij.ui.dsl.listCellRenderer.textListCellRenderer
 import info.chrzanowski.ideatmosphere.AtmosphereBundle
 import info.chrzanowski.ideatmosphere.AtmosphereManager
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
+import info.chrzanowski.ideatmosphere.core.PointerMode
 import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
 import java.awt.event.ItemEvent
 import javax.swing.JComponent
@@ -94,6 +96,12 @@ class AtmosphereSettingsConfigurable internal constructor(
                         .comment(AtmosphereBundle.message("settings.reactToActivity.comment"))
                 }
                 row {
+                    checkBox(AtmosphereBundle.message("settings.reactToTyping"))
+                        .bindSelected({ currentDraft().reactToTyping }, { currentDraft().reactToTyping = it })
+                        .applyToComponent { name = "reactToTyping" }
+                        .comment(AtmosphereBundle.message("settings.reactToTyping.comment"))
+                }
+                row {
                     button(AtmosphereBundle.message("settings.preview.success")) { previewOutcome(AtmosphereEvent.SUCCESS) }
                         .applyToComponent { name = "previewSuccess" }
                     button(AtmosphereBundle.message("settings.preview.failure")) { previewOutcome(AtmosphereEvent.FAILURE) }
@@ -103,15 +111,33 @@ class AtmosphereSettingsConfigurable internal constructor(
                     comment(AtmosphereBundle.message("settings.preview.comment"))
                         .applyToComponent { name = "previewComment" }
                 }
-                row {
-                    checkBox(AtmosphereBundle.message("settings.avoidMouse"))
-                        .bindSelected({ currentDraft().avoidMouse }, { currentDraft().avoidMouse = it })
-                        .applyToComponent { name = "avoidMouse" }
+                row(AtmosphereBundle.message("settings.pointerMode")) {
+                    comboBox(PointerMode.entries, textListCellRenderer { mode -> mode?.let(::pointerModeName) })
+                        .bindItem({ currentDraft().pointerMode }, { currentDraft().pointerMode = it ?: PointerMode.AVOID })
+                        .applyToComponent { name = "pointerMode" }
+                        .comment(AtmosphereBundle.message("settings.pointerMode.comment"))
                 }
                 row {
                     checkBox(AtmosphereBundle.message("settings.pauseOnFocusLoss"))
                         .bindSelected({ currentDraft().pauseOnFocusLoss }, { currentDraft().pauseOnFocusLoss = it })
                         .applyToComponent { name = "pauseOnFocusLoss" }
+                }
+                row {
+                    checkBox(AtmosphereBundle.message("settings.reduceMotion"))
+                        .bindSelected({ currentDraft().reduceMotion }, { currentDraft().reduceMotion = it })
+                        .applyToComponent { name = "reduceMotion" }
+                        .comment(AtmosphereBundle.message("settings.reduceMotion.comment"))
+                }
+            }
+            group(AtmosphereBundle.message("settings.themePresets")) {
+                row(AtmosphereBundle.message("settings.lightEffect")) {
+                    presetCombo("lightEffectId", { currentDraft().lightEffectId }, { currentDraft().lightEffectId = it })
+                }
+                row(AtmosphereBundle.message("settings.darkEffect")) {
+                    presetCombo("darkEffectId", { currentDraft().darkEffectId }, { currentDraft().darkEffectId = it })
+                }
+                row {
+                    comment(AtmosphereBundle.message("settings.themePresets.comment"))
                 }
             }
         }
@@ -134,7 +160,21 @@ class AtmosphereSettingsConfigurable internal constructor(
             paintTicks = false
         }
 
+    /** Combo of "same as the atmosphere above" (`null`) followed by every registered effect. */
+    private fun Row.presetCombo(id: String, read: () -> String?, write: (String?) -> Unit): Cell<ComboBox<String?>> =
+        comboBox(
+            listOf<String?>(null) + AtmosphereEffects.ids,
+            textListCellRenderer { effectId ->
+                if (effectId == null) AtmosphereBundle.message("settings.preset.same") else effectName(effectId)
+            },
+        )
+            .bindItem(read, write)
+            .applyToComponent { name = id }
+
     private fun effectName(id: String): String = AtmosphereBundle.messageOrNull("effect.$id.name") ?: id
+
+    private fun pointerModeName(mode: PointerMode): String =
+        AtmosphereBundle.messageOrNull("settings.pointerMode.${mode.name}") ?: mode.name
 
     private fun showDescription(id: String?) {
         effectDescription?.text = id?.let { AtmosphereBundle.messageOrNull("effect.$it.description") } ?: ""

@@ -4,9 +4,12 @@ import info.chrzanowski.ideatmosphere.core.AtmosphereEffect
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
 import info.chrzanowski.ideatmosphere.core.AtmospherePalette
 import info.chrzanowski.ideatmosphere.core.EffectContext
+import info.chrzanowski.ideatmosphere.core.PointerMode
 import info.chrzanowski.ideatmosphere.effects.fireflies.FirefliesEffect
+import info.chrzanowski.ideatmosphere.effects.rain.RainEffect
 import info.chrzanowski.ideatmosphere.effects.sakura.SakuraEffect
 import info.chrzanowski.ideatmosphere.effects.snow.SnowEffect
+import info.chrzanowski.ideatmosphere.effects.starfield.StarfieldEffect
 import info.chrzanowski.ideatmosphere.render.DirtyRegionCollector
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -17,7 +20,10 @@ import java.awt.image.BufferedImage
 
 class EffectSettingsTest {
 
-    private val factories = listOf({ FirefliesEffect() }, { SakuraEffect() }, { SnowEffect() })
+    private val particleFactories = listOf({ FirefliesEffect() }, { SakuraEffect() }, { SnowEffect() })
+
+    /** Every atmosphere; they share the intensity, speed, pulse timing, dirty-rect and pointer contracts. */
+    private val factories = particleFactories + listOf({ RainEffect() }, { StarfieldEffect() })
     private val dt = 1f / 24f
 
     private fun started(factory: () -> AtmosphereEffect): AtmosphereEffect = factory().also {
@@ -28,6 +34,8 @@ class EffectSettingsTest {
         is FirefliesEffect -> effect.particleCount
         is SakuraEffect -> effect.particleCount
         is SnowEffect -> effect.particleCount
+        is RainEffect -> effect.particleCount
+        is StarfieldEffect -> effect.particleCount
         else -> error(effect.id)
     }
 
@@ -35,6 +43,8 @@ class EffectSettingsTest {
         is FirefliesEffect -> effect.speedMultiplier
         is SakuraEffect -> effect.speedMultiplier
         is SnowEffect -> effect.speedMultiplier
+        is RainEffect -> effect.speedMultiplier
+        is StarfieldEffect -> effect.speedMultiplier
         else -> error(effect.id)
     }
 
@@ -42,6 +52,8 @@ class EffectSettingsTest {
         is FirefliesEffect -> FirefliesEffect.particleCountFor(bounds.width, bounds.height, intensity)
         is SakuraEffect -> SakuraEffect.particleCountFor(bounds.width, bounds.height, intensity)
         is SnowEffect -> SnowEffect.particleCountFor(bounds.width, bounds.height, intensity)
+        is RainEffect -> RainEffect.particleCountFor(bounds.width, bounds.height, intensity)
+        is StarfieldEffect -> StarfieldEffect.particleCountFor(bounds.width, bounds.height, intensity)
         else -> error(effect.id)
     }
 
@@ -135,7 +147,7 @@ class EffectSettingsTest {
     @Test
     fun `outcomes never tint particles or add halos on either palette`() {
         val bounds = Rectangle(0, 0, 800, 600)
-        for (factory in factories) for (palette in listOf(AtmospherePalette.DARK, AtmospherePalette.LIGHT)) {
+        for (factory in particleFactories) for (palette in listOf(AtmospherePalette.DARK, AtmospherePalette.LIGHT)) {
             val effect = started(factory)
             effect.onPaletteChanged(palette)
             repeat(48) { effect.update(dt, bounds, DirtyRegionCollector(100)) }
@@ -161,7 +173,7 @@ class EffectSettingsTest {
     @Test
     fun `success lifts the particles and failure dims them before both settle back`() {
         val bounds = Rectangle(0, 0, 800, 600)
-        for (factory in factories) {
+        for (factory in particleFactories) {
             val effect = started(factory)
             val reference = started(factory)
             repeat(48) {
@@ -230,7 +242,10 @@ class EffectSettingsTest {
                 effect.update(dt, bounds, DirtyRegionCollector(100))
                 reference.update(dt, bounds, DirtyRegionCollector(100))
             }
-            assertTrue("${effect.id} particles must flee to the right", centroidX(paint(effect, bounds)) > centroidX(paint(reference, bounds)) + 15.0)
+            // Rain drops fall past the cursor within a few ticks, so they have less time to be pushed sideways.
+            val minimumShift = if (effect is RainEffect) 4.0 else 15.0
+            val shift = centroidX(paint(effect, bounds)) - centroidX(paint(reference, bounds))
+            assertTrue("${effect.id} particles must flee to the right, shifted by $shift", shift > minimumShift)
             val distant = started(factory)
             val unchanged = started(factory)
             distant.onPointerChanged(-1000f, -1000f, true)
@@ -240,6 +255,103 @@ class EffectSettingsTest {
             }
             assertEquals(effect.id, alphaSum(paint(unchanged, bounds)), alphaSum(paint(distant, bounds)))
             assertEquals(effect.id, centroidX(paint(unchanged, bounds)), centroidX(paint(distant, bounds)), 0.0)
+        }
+    }
+
+    @Test
+    fun `typing flow stirs every atmosphere by up to half its speed and clamps bad input`() {
+        val bounds = Rectangle(0, 0, 800, 600)
+        for (factory in factories) {
+            val effect = started(factory)
+            effect.update(dt, bounds, DirtyRegionCollector(100))
+            val rest = multiplier(effect)
+            assertTrue(effect.id, rest > 0f)
+
+            effect.setFlow(1f)
+            assertEquals("${effect.id}: applies immediately", rest * (1f + AtmosphereEffect.FLOW_SPEED_BOOST), multiplier(effect), 0.001f)
+            effect.update(dt, bounds, DirtyRegionCollector(100))
+            assertEquals("${effect.id}: survives the next tick", rest * (1f + AtmosphereEffect.FLOW_SPEED_BOOST), multiplier(effect), 0.001f)
+
+            effect.setFlow(0.5f)
+            assertEquals(effect.id, rest * (1f + AtmosphereEffect.FLOW_SPEED_BOOST * 0.5f), multiplier(effect), 0.001f)
+
+            effect.setFlow(7f)
+            assertEquals("${effect.id}: clamped to 1", rest * (1f + AtmosphereEffect.FLOW_SPEED_BOOST), multiplier(effect), 0.001f)
+            effect.setFlow(-3f)
+            assertEquals("${effect.id}: clamped to 0", rest, multiplier(effect), 0.001f)
+            effect.setFlow(Float.NaN)
+            assertEquals("${effect.id}: NaN is rest", rest, multiplier(effect), 0.001f)
+
+            // The flow gain multiplies the speed setting rather than replacing it.
+            effect.setFlow(1f)
+            effect.setSpeedScale(2f)
+            effect.update(dt, bounds, DirtyRegionCollector(100))
+            assertEquals(effect.id, rest * 2f * (1f + AtmosphereEffect.FLOW_SPEED_BOOST), multiplier(effect), 0.001f)
+        }
+    }
+
+    @Test
+    fun `attract gathers particles towards the cursor and off ignores it`() {
+        val bounds = Rectangle(0, 0, 800, 600)
+        for (factory in factories) {
+            val attracted = started(factory)
+            val ignoring = started(factory)
+            val reference = started(factory)
+            attracted.setPointerMode(PointerMode.ATTRACT)
+            ignoring.setPointerMode(PointerMode.OFF)
+            for (effect in listOf(attracted, ignoring, reference)) {
+                repeat(48) { effect.update(dt, bounds, DirtyRegionCollector(100)) }
+                placeAllAtCentre(effect)
+            }
+            attracted.onPointerChanged(300f, 300f, true)
+            ignoring.onPointerChanged(300f, 300f, true)
+            repeat(12) {
+                for (effect in listOf(attracted, ignoring, reference)) effect.update(dt, bounds, DirtyRegionCollector(100))
+            }
+            val minimumShift = if (attracted is RainEffect) 2.0 else 8.0
+            val shift = centroidX(paint(reference, bounds)) - centroidX(paint(attracted, bounds))
+            assertTrue("${attracted.id} particles must gather towards the left, shifted by $shift", shift > minimumShift)
+            assertEquals(ignoring.id, centroidX(paint(reference, bounds)), centroidX(paint(ignoring, bounds)), 0.0)
+            assertEquals(ignoring.id, alphaSum(paint(reference, bounds)), alphaSum(paint(ignoring, bounds)))
+        }
+    }
+
+    @Test
+    fun `a click puffs nearby particles outward and the burst is fully covered by dirty regions`() {
+        val bounds = Rectangle(0, 0, 800, 600)
+        for (factory in factories) {
+            val effect = started(factory)
+            val reference = started(factory)
+            repeat(48) {
+                effect.update(dt, bounds, DirtyRegionCollector(100))
+                reference.update(dt, bounds, DirtyRegionCollector(100))
+            }
+            placeAllAtCentre(effect)
+            placeAllAtCentre(reference)
+            effect.onPointerPressed(370f, 300f)
+            repeat(12) {
+                val before = paint(effect, bounds)
+                val dirty = DirtyRegionCollector(200)
+                effect.update(dt, bounds, dirty)
+                assertCovered(before, paint(effect, bounds), bounds, dirty)
+                reference.update(dt, bounds, DirtyRegionCollector(100))
+            }
+            val minimumShift = if (effect is RainEffect) 4.0 else 10.0
+            val shift = centroidX(paint(effect, bounds)) - centroidX(paint(reference, bounds))
+            assertTrue("${effect.id} particles must puff to the right, shifted by $shift", shift > minimumShift)
+
+            // A click far away or with the pointer switched off leaves the particles alone.
+            val far = started(factory)
+            val off = started(factory)
+            val untouched = started(factory)
+            off.setPointerMode(PointerMode.OFF)
+            far.onPointerPressed(-1000f, -1000f)
+            off.onPointerPressed(370f, 300f)
+            repeat(12) {
+                for (candidate in listOf(far, off, untouched)) candidate.update(dt, bounds, DirtyRegionCollector(100))
+            }
+            assertEquals(effect.id, centroidX(paint(untouched, bounds)), centroidX(paint(far, bounds)), 0.0)
+            assertEquals(effect.id, centroidX(paint(untouched, bounds)), centroidX(paint(off, bounds)), 0.0)
         }
     }
 
@@ -276,6 +388,8 @@ class EffectSettingsTest {
             is FirefliesEffect -> effect.placeParticleForTest(i, 400f, 300f, 0.8f)
             is SakuraEffect -> effect.placeParticleForTest(i, 400f, 300f, 0f, 0.8f)
             is SnowEffect -> effect.placeParticleForTest(i, 400f, 300f, 0.8f)
+            is RainEffect -> effect.placeParticleForTest(i, 400f, 300f, 0.8f)
+            is StarfieldEffect -> effect.placeParticleForTest(i, 400f, 300f, 0.8f)
         }
     }
 
@@ -328,6 +442,8 @@ class EffectSettingsTest {
         is FirefliesEffect -> effect.failureGlow
         is SakuraEffect -> effect.failureGlow
         is SnowEffect -> effect.failureGlow
+        is RainEffect -> effect.failureGlow
+        is StarfieldEffect -> effect.failureGlow
         else -> error(effect.id)
     }
 
@@ -335,6 +451,8 @@ class EffectSettingsTest {
         is FirefliesEffect -> effect.glow
         is SakuraEffect -> effect.glow
         is SnowEffect -> effect.glow
+        is RainEffect -> effect.glow
+        is StarfieldEffect -> effect.glow
         else -> error(effect.id)
     }
 

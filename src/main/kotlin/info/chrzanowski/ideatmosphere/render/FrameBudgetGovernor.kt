@@ -11,13 +11,14 @@ import kotlin.math.abs
  * `[minFps, maxFps]`. A change is applied only when it differs from the current rate by at least
  * [hysteresisFps] so the rate does not flap between adjacent values.
  *
- * Default budget: 100 000 µs of work per second ≈ 10 % of one core, governed between 20 and 30 FPS. The ceiling
+ * Default budget: 70 000 µs of work per second ≈ 7 % of one core, governed between 20 and 30 FPS. The ceiling
  * was raised from 3 % after the smoothness fix (see `docs/overlay-investigation.md` §10.3): with the nested batch
- * a tick costs ≈ 3 ms, so 30 FPS fits, and the floor of 20 FPS keeps the motion fluid before any other lever
- * (particle count, idle speed) is touched.
+ * a tick costs ≈ 3 ms, and the floor of 20 FPS keeps the motion fluid before any other lever (particle count,
+ * idle speed) is touched. Adaptive commit (§13) makes ticks cheaper, so 30 FPS still fits under the lowered
+ * budget in a quiet IDE while a busy one sheds load sooner.
  */
 class FrameBudgetGovernor(
-    private val budgetMicrosPerSecond: Int = 100_000,
+    private val budgetMicrosPerSecond: Int = 70_000,
     val minFps: Int = 20,
     val maxFps: Int = 30,
     initialFps: Int = 30,

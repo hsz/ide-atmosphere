@@ -2,8 +2,10 @@ package info.chrzanowski.ideatmosphere.effects
 
 import info.chrzanowski.ideatmosphere.core.AtmosphereEffect
 import info.chrzanowski.ideatmosphere.effects.fireflies.FirefliesEffect
+import info.chrzanowski.ideatmosphere.effects.rain.RainEffect
 import info.chrzanowski.ideatmosphere.effects.sakura.SakuraEffect
 import info.chrzanowski.ideatmosphere.effects.snow.SnowEffect
+import info.chrzanowski.ideatmosphere.effects.starfield.StarfieldEffect
 
 /**
  * In-code registry of available atmospheres. Every frame gets its own effect instance, so the
@@ -18,6 +20,8 @@ object AtmosphereEffects {
         FirefliesEffect.ID to { FirefliesEffect() },
         SakuraEffect.ID to { SakuraEffect() },
         SnowEffect.ID to { SnowEffect() },
+        RainEffect.ID to { RainEffect() },
+        StarfieldEffect.ID to { StarfieldEffect() },
     )
 
     /** Ids of all registered effects, in registration order. */

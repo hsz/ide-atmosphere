@@ -3,6 +3,7 @@ package info.chrzanowski.ideatmosphere.settings
 import com.intellij.openapi.util.JDOMUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.util.xmlb.XmlSerializer
+import info.chrzanowski.ideatmosphere.core.PointerMode
 import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
 
 class AtmosphereSettingsStateTest : BasePlatformTestCase() {
@@ -10,6 +11,15 @@ class AtmosphereSettingsStateTest : BasePlatformTestCase() {
     override fun setUp() {
         super.setUp()
         AtmosphereSettingsState.getInstance().loadState(AtmosphereSettingsState.State())
+    }
+
+    override fun tearDown() {
+        try {
+            // The application-level settings are shared with other test classes; leave the defaults behind.
+            AtmosphereSettingsState.getInstance().loadState(AtmosphereSettingsState.State())
+        } finally {
+            super.tearDown()
+        }
     }
 
     fun `test defaults`() {
@@ -20,9 +30,96 @@ class AtmosphereSettingsStateTest : BasePlatformTestCase() {
         assertEquals(1f, state.speed)
         assertTrue(state.reactToActivity)
         assertTrue(state.pauseOnFocusLoss)
-        assertTrue(state.avoidMouse)
+        assertEquals(PointerMode.AVOID, state.pointerMode)
+        assertTrue(state.reactToTyping)
+        assertFalse(state.reduceMotion)
+        assertNull(state.darkEffectId)
+        assertNull(state.lightEffectId)
         assertEquals(AtmosphereSettingsState.State(), state)
         assertEquals(state, state.normalized())
+    }
+
+    fun `test reduce motion and per-theme presets round-trip through XML`() {
+        val original = AtmosphereSettingsState.State(
+            reduceMotion = true,
+            darkEffectId = "starfield",
+            lightEffectId = "rain",
+        )
+
+        val restored = roundTrip(original)
+        val settings = AtmosphereSettingsState()
+        settings.loadState(restored)
+
+        assertEquals(original, restored)
+        assertEquals(original, settings.state)
+        val options = XmlSerializer.serialize(original).getChildren("option").associate {
+            it.getAttributeValue("name") to it.getAttributeValue("value")
+        }
+        assertEquals("true", options["reduceMotion"])
+        assertEquals("starfield", options["darkEffectId"])
+        assertEquals("rain", options["lightEffectId"])
+        // Plain attributes only, no nested elements.
+        assertTrue(XmlSerializer.serialize(original).getChildren("option").all { it.children.isEmpty() })
+    }
+
+    fun `test unknown per-theme ids fall back to no preset`() {
+        val settings = AtmosphereSettingsState()
+
+        settings.loadState(AtmosphereSettingsState.State(darkEffectId = "unknown", lightEffectId = ""))
+        assertNull(settings.state.darkEffectId)
+        assertNull(settings.state.lightEffectId)
+
+        settings.loadState(AtmosphereSettingsState.State(darkEffectId = "snow", lightEffectId = "SNOW"))
+        assertEquals("snow", settings.state.darkEffectId)
+        assertNull(settings.state.lightEffectId)
+    }
+
+    fun `test every registered effect is accepted as a per-theme preset`() {
+        for (effectId in AtmosphereEffects.ids) {
+            val settings = AtmosphereSettingsState()
+            settings.loadState(roundTrip(AtmosphereSettingsState.State(darkEffectId = effectId, lightEffectId = effectId)))
+
+            assertEquals(effectId, settings.state.darkEffectId)
+            assertEquals(effectId, settings.state.lightEffectId)
+        }
+    }
+
+    fun `test effectIdFor prefers the per-theme preset`() {
+        val plain = AtmosphereSettingsState.State(effectId = "sakura")
+        assertEquals("sakura", plain.effectIdFor(isDark = true))
+        assertEquals("sakura", plain.effectIdFor(isDark = false))
+
+        val both = AtmosphereSettingsState.State(effectId = "sakura", darkEffectId = "starfield", lightEffectId = "rain")
+        assertEquals("starfield", both.effectIdFor(isDark = true))
+        assertEquals("rain", both.effectIdFor(isDark = false))
+
+        val darkOnly = AtmosphereSettingsState.State(effectId = "sakura", darkEffectId = "starfield")
+        assertEquals("starfield", darkOnly.effectIdFor(isDark = true))
+        assertEquals("sakura", darkOnly.effectIdFor(isDark = false))
+    }
+
+    fun `test effective speed is capped only while reduce motion is on`() {
+        assertEquals(1.5f, AtmosphereSettingsState.State(speed = 1.5f).effectiveSpeed())
+        assertEquals(AtmosphereSettingsState.REDUCED_MOTION_SPEED, AtmosphereSettingsState.State(speed = 1.5f, reduceMotion = true).effectiveSpeed())
+        // Never raised above what the user already chose.
+        assertEquals(0.3f, AtmosphereSettingsState.State(speed = 0.3f, reduceMotion = true).effectiveSpeed())
+        assertEquals(AtmosphereSettingsState.SCALE_RANGE.start, AtmosphereSettingsState.REDUCED_MOTION_SPEED)
+    }
+
+    fun `test legacy XML without the new options loads with reduce motion off and no presets`() {
+        val legacy = JDOMUtil.load(
+            """
+            <State>
+              <option name="effectId" value="snow" />
+              <option name="avoidMouse" value="false" />
+            </State>
+            """.trimIndent(),
+        )
+
+        val restored = XmlSerializer.deserialize(legacy, AtmosphereSettingsState.State::class.java)
+
+        assertEquals(AtmosphereSettingsState.State(effectId = "snow", pointerMode = PointerMode.OFF), restored)
+        assertEquals(restored, restored.normalized())
     }
 
     fun `test scale range spans 30 to 200 percent`() {
@@ -37,7 +134,7 @@ class AtmosphereSettingsStateTest : BasePlatformTestCase() {
             speed = 1.5f,
             reactToActivity = false,
             pauseOnFocusLoss = false,
-            avoidMouse = false,
+            pointerMode = PointerMode.OFF,
         )
 
         val restored = roundTrip(original)
@@ -49,14 +146,18 @@ class AtmosphereSettingsStateTest : BasePlatformTestCase() {
         assertNotSame(restored, settings.state)
     }
 
-    fun `test serialized XML consists of the six plain options only`() {
+    fun `test serialized XML consists of the plain options plus the legacy avoidMouse mirror only`() {
         val state = AtmosphereSettingsState.State(
             effectId = nonDefaultEffect(),
             intensity = 0.5f,
             speed = 1.5f,
             reactToActivity = false,
             pauseOnFocusLoss = false,
-            avoidMouse = false,
+            reactToTyping = false,
+            pointerMode = PointerMode.OFF,
+            reduceMotion = true,
+            darkEffectId = "starfield",
+            lightEffectId = "rain",
         )
 
         val xml = XmlSerializer.serialize(state)
@@ -65,21 +166,66 @@ class AtmosphereSettingsStateTest : BasePlatformTestCase() {
         assertEquals("State", xml.name)
         assertEquals(options.size, xml.children.size)
         assertEquals(
-            setOf("effectId", "intensity", "speed", "reactToActivity", "pauseOnFocusLoss", "avoidMouse"),
+            setOf(
+                "effectId", "intensity", "speed", "reactToActivity", "pauseOnFocusLoss", "reactToTyping", "pointerMode",
+                "avoidMouse", "reduceMotion", "darkEffectId", "lightEffectId",
+            ),
             options.map { it.getAttributeValue("name") }.toSet(),
         )
-        assertEquals(6, options.size)
+        assertEquals(11, options.size)
         assertTrue(options.all { it.getAttributeValue("value") != null && it.children.isEmpty() })
     }
 
+    fun `test legacy avoidMouse migrates to the pointer mode`() {
+        for ((legacy, expected) in listOf("true" to PointerMode.AVOID, "false" to PointerMode.OFF)) {
+            val restored = XmlSerializer.deserialize(
+                JDOMUtil.load("""<State><option name="avoidMouse" value="$legacy" /></State>"""),
+                AtmosphereSettingsState.State::class.java,
+            )
+
+            assertEquals(legacy, expected, restored.pointerMode)
+            assertEquals(AtmosphereSettingsState.State(pointerMode = expected), restored)
+            val settings = AtmosphereSettingsState()
+            settings.loadState(restored)
+            assertEquals(expected, settings.state.pointerMode)
+        }
+    }
+
+    fun `test pointer mode wins over the legacy mirror whatever the option order`() {
+        for (mode in PointerMode.entries) {
+            val mirror = if (mode == PointerMode.OFF) "false" else "true"
+            for (xml in listOf(
+                """<State><option name="pointerMode" value="$mode" /><option name="avoidMouse" value="$mirror" /></State>""",
+                """<State><option name="avoidMouse" value="$mirror" /><option name="pointerMode" value="$mode" /></State>""",
+                """<State><option name="pointerMode" value="$mode" /></State>""",
+            )) {
+                val restored = XmlSerializer.deserialize(JDOMUtil.load(xml), AtmosphereSettingsState.State::class.java)
+                assertEquals(xml, mode, restored.pointerMode)
+            }
+        }
+    }
+
+    fun `test the avoidMouse mirror follows the pointer mode`() {
+        assertTrue(AtmosphereSettingsState.State(pointerMode = PointerMode.AVOID).avoidMouse)
+        assertTrue(AtmosphereSettingsState.State(pointerMode = PointerMode.ATTRACT).avoidMouse)
+        assertFalse(AtmosphereSettingsState.State(pointerMode = PointerMode.OFF).avoidMouse)
+        // The mirror only ever switches the pointer off, so a stale `true` cannot undo an explicit mode.
+        val attract = AtmosphereSettingsState.State(pointerMode = PointerMode.ATTRACT)
+        attract.avoidMouse = true
+        assertEquals(PointerMode.ATTRACT, attract.pointerMode)
+        attract.avoidMouse = false
+        assertEquals(PointerMode.OFF, attract.pointerMode)
+    }
+
     fun `test boolean flags round-trip independently of each other`() {
-        for (avoidMouse in listOf(false, true)) {
+        for (pointerMode in PointerMode.entries) {
             for (reactToActivity in listOf(false, true)) {
                 for (pauseOnFocusLoss in listOf(false, true)) {
                     val original = AtmosphereSettingsState.State(
                         reactToActivity = reactToActivity,
                         pauseOnFocusLoss = pauseOnFocusLoss,
-                        avoidMouse = avoidMouse,
+                        reactToTyping = pauseOnFocusLoss != reactToActivity,
+                        pointerMode = pointerMode,
                     )
                     val settings = AtmosphereSettingsState()
                     settings.loadState(roundTrip(original))
@@ -193,7 +339,7 @@ class AtmosphereSettingsStateTest : BasePlatformTestCase() {
             speed = 1.4f,
             reactToActivity = false,
             pauseOnFocusLoss = false,
-            avoidMouse = false,
+            pointerMode = PointerMode.OFF,
         )
 
         val restored = XmlSerializer.deserialize(legacy, AtmosphereSettingsState.State::class.java)
@@ -221,7 +367,7 @@ class AtmosphereSettingsStateTest : BasePlatformTestCase() {
         assertEquals(AtmosphereSettingsState.State(intensity = 0.8f), restored)
         assertTrue(restored.reactToActivity)
         assertTrue(restored.pauseOnFocusLoss)
-        assertTrue(restored.avoidMouse)
+        assertEquals(PointerMode.AVOID, restored.pointerMode)
     }
 
     fun `test load state normalizes and detaches`() {
@@ -238,7 +384,10 @@ class AtmosphereSettingsStateTest : BasePlatformTestCase() {
         original.speed = 0.5f
         original.reactToActivity = false
         original.pauseOnFocusLoss = false
-        original.avoidMouse = false
+        original.pointerMode = PointerMode.OFF
+        original.reduceMotion = true
+        original.darkEffectId = "snow"
+        original.lightEffectId = "rain"
         assertEquals(expected, settings.state)
     }
 
@@ -261,7 +410,7 @@ class AtmosphereSettingsStateTest : BasePlatformTestCase() {
             speed = 1.5f,
             reactToActivity = false,
             pauseOnFocusLoss = false,
-            avoidMouse = false,
+            pointerMode = PointerMode.OFF,
         )
         val snapshot = original.copy()
 
@@ -274,7 +423,10 @@ class AtmosphereSettingsStateTest : BasePlatformTestCase() {
         copy.speed = 0.3f
         copy.reactToActivity = true
         copy.pauseOnFocusLoss = true
-        copy.avoidMouse = true
+        copy.pointerMode = PointerMode.ATTRACT
+        copy.reduceMotion = true
+        copy.darkEffectId = "snow"
+        copy.lightEffectId = "rain"
         assertEquals(snapshot, original)
     }
 
@@ -288,7 +440,7 @@ class AtmosphereSettingsStateTest : BasePlatformTestCase() {
         draft.speed = 0.3f
         draft.reactToActivity = false
         draft.pauseOnFocusLoss = false
-        draft.avoidMouse = false
+        draft.pointerMode = PointerMode.OFF
 
         assertEquals(original, settings.state)
         assertNotSame(draft, settings.state)

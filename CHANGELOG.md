@@ -6,6 +6,16 @@
 
 ### Added
 
+- `RainEffect`: fine rain streaking down in depth layers (nearer drops longer, brighter and faster), leaning with a gentle breeze and splashing where the near drops land; a success eases the rain, a failure brings a stormy gust with a brief brightness-only flash.
+- `StarfieldEffect`: a slowly drifting, twinkling night sky with a rare shooting star (cold white on dark themes, soft slate-blue on light ones); a success lifts the stars and launches a shooting star, a failure makes the sky shiver and dim.
+- **Reduce motion** setting: every atmosphere runs very slowly at a capped frame rate without success bursts, failure gusts, click puffs or typing boosts.
+- **Atmosphere** status bar widget showing the current atmosphere, with a popup to switch to any other one, **Pause for 1 Hour** (a non-persisted snooze, resumable at any time) and a shortcut to the settings page.
+- Optional per-theme presets: a different atmosphere for light and for dark themes (**Same as above** by default), applied on theme change.
+- Pointer modes **Avoid / Attract / Off** replace the mouse-avoidance checkbox: *Attract* pulls particles towards the pointer and holds them just outside a soft stop radius; the persisted `avoidMouse` flag migrates automatically (`false` → *Off*).
+- Click bursts: a mouse press puffs nearby particles outward (passively observed through the toolkit, never consumed); off under Reduce Motion or with the pointer mode *Off*.
+- Typing rhythm: keystrokes feed a smoothed flow level (`AtmosphereEffect.setFlow`) that stirs every atmosphere up to 1.5× its speed while typing fast and settles within a few seconds after a pause; **React to typing** toggle.
+- Test-run outcomes: `TestResultActivityProducer` publishes one SUCCESS (all passed) or FAILURE (any failed) per run from the test runner's result tree; stopped or empty runs are neutral.
+- Commit and push outcomes: a successful commit (`CheckinHandler`) or Git push celebrates, a failed commit or a rejected push shivers. Registered through optional `com.intellij.modules.vcs` / `Git4Idea` descriptors so platform-only IDEs still load the plugin.
 - `SnowEffect`: a third atmosphere — layered snowflakes with depth (near flakes larger, brighter and faster), gentle sway and wind, theme-aware white / blue-grey colours, the same idle, activity, success and failure reactions and cursor avoidance as the other atmospheres.
 - Optional, smooth mouse avoidance for every atmosphere using passive cursor observation without consuming input; particles within 180 px accelerate away (up to 120 px/s) and glide back afterwards.
 - Motion-only outcome reactions: a success lifts the whole field for a moment (fireflies also brighten), a failure scatters the fireflies or sends one gust through petals and snow while everything dims briefly. **Preview success** / **Preview failure** buttons play them on the open windows.
@@ -25,6 +35,9 @@
 
 ### Changed
 
+- `CursorAvoidance` gained a `PointerMode` and a `burst` puff; `AtmosphereEffect` gained `onPointerPressed`, `setPointerMode` and `setFlow` (all default no-ops). `FrameAtmosphere.cursorAvoidanceEnabled` became `pointerMode`.
+- The plugin description, README and settings comments now cover the five atmospheres, pointer modes, typing, test / commit / push reactions, Reduce Motion, per-theme presets and the status bar widget.
+- Adaptive commit for particle repainting: `SnowEffect`, `FirefliesEffect` and `SakuraEffect` now report a particle as dirty only when it moved ≥ 0.4 px, its alpha changed by ≥ 3 of 256 steps or it was stale for 4 ticks (shared `CommitPolicy`, replacing the per-effect `MOVE_EPSILON = 0.02 px`), so slow and twinkling particles skip ticks while fast ones keep the full rate. The `FrameBudgetGovernor` budget dropped from 100 000 to 70 000 µs/s and the debug stats line gained `rects/s`. See `docs/overlay-investigation.md` §13.
 - Settings page rebuilt around what matters: atmosphere picker with a one-line description, **Intensity** (Subtle…Vivid) and **Speed** (Calm…Lively) sliders and three behaviour switches. The ADSR envelope editors, their numeric fields and the persisted per-theme/shared reaction profiles are gone; reaction timings are built into each atmosphere.
 - Success no longer paints an expanded, green-tinted halo and failure no longer tints particles red — particles keep their colour and shape at all times; outcomes are expressed through motion and brightness only.
 - Recalibrated the dirty-region cost model and particle densities (Step 15) from fresh built-in display measurements. The per-rectangle fixed cost was raised from 120 µs to 500 µs to reflect real-world Swing repaint overhead, resulting in ≈ 60 % fewer rectangles per tick and a stable active-user CPU cost of ≈ 10 %. Particle density was lowered to stay near the minimum threshold (≈ 20 fireflies, ≈ 16 petals).

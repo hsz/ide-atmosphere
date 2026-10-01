@@ -18,11 +18,19 @@ class FrameBudgetGovernorTest {
     }
 
     @Test
-    fun `the measured nested-batch tick cost keeps the full 30 fps`() {
-        // 2.9 ms per tick × 30 fps = 87 ms/s, under the 100 ms/s (≈10 %) budget.
+    fun `the adaptive-commit tick cost keeps the full 30 fps`() {
+        // 2.2 ms per tick × 30 fps = 66 ms/s, under the 70 ms/s (≈7 %) budget.
+        val governor = FrameBudgetGovernor()
+        governor.simulateSeconds(3, costMicros = 2_200)
+        assertEquals(30, governor.fps)
+    }
+
+    @Test
+    fun `the former full-commit tick cost now sheds load`() {
+        // 2.9 ms per tick would be 87 ms/s: over the lowered 70 ms/s budget, so the rate drops to 24 fps.
         val governor = FrameBudgetGovernor()
         governor.simulateSeconds(3, costMicros = 2_900)
-        assertEquals(30, governor.fps)
+        assertEquals(24, governor.fps)
     }
 
     @Test
@@ -60,15 +68,15 @@ class FrameBudgetGovernorTest {
 
     @Test
     fun `hysteresis ignores changes of a single fps`() {
-        // budget 100_000 / 4_000 µs = 25 fps → applied; 4_100 µs → 24 fps → within hysteresis, stays.
+        // budget 70_000 / 2_800 µs = 25 fps → applied; 2_900 µs → 24 fps → within hysteresis, stays.
         val governor = FrameBudgetGovernor()
-        governor.simulateSeconds(3, costMicros = 4_000)
+        governor.simulateSeconds(3, costMicros = 2_800)
         assertEquals(25, governor.fps)
-        governor.simulateSeconds(3, costMicros = 4_100)
+        governor.simulateSeconds(3, costMicros = 2_900)
         assertEquals(25, governor.fps)
-        // 4_500 µs → 22 fps → applied.
-        governor.simulateSeconds(3, costMicros = 4_500)
-        assertEquals(22, governor.fps)
+        // 3_200 µs → 21 fps → applied.
+        governor.simulateSeconds(3, costMicros = 3_200)
+        assertEquals(21, governor.fps)
     }
 
     @Test

@@ -4,8 +4,10 @@ import info.chrzanowski.ideatmosphere.core.AdsrEnvelope
 import info.chrzanowski.ideatmosphere.core.AtmosphereEffect
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
 import info.chrzanowski.ideatmosphere.core.AtmospherePalette
+import info.chrzanowski.ideatmosphere.core.CommitPolicy
 import info.chrzanowski.ideatmosphere.core.CursorAvoidance
 import info.chrzanowski.ideatmosphere.core.EffectContext
+import info.chrzanowski.ideatmosphere.core.PointerMode
 import info.chrzanowski.ideatmosphere.render.DirtyRegionCollector
 import java.awt.Color
 import java.awt.Graphics2D
@@ -28,6 +30,12 @@ import kotlin.math.sin
  * The architecture mirrors [info.chrzanowski.ideatmosphere.effects.fireflies.FirefliesEffect] using
  * structure-of-arrays to avoid per-tick allocations.
  *
+ * Dirty reporting is adaptive ([CommitPolicy]): the simulation runs on every tick, but a petal is committed
+ * (reported and repainted) only once its on-screen state would visibly change — it moved or turned by
+ * [CommitPolicy.MOVE_THRESHOLD] px, its alpha changed by [CommitPolicy.ALPHA_STEP_THRESHOLD] of [ALPHA_STEPS]
+ * steps, or it has been stale for [CommitPolicy.MAX_STALE_TICKS] ticks. Rotation counts as displacement of the
+ * petal's outline: `Δrotation × size` px.
+ *
  * Rendering uses a single reused [Path2D.Float] rebuilt via manual trigonometry per petal to support
  * rotation without [java.awt.geom.AffineTransform] allocations.
  */
@@ -41,6 +49,8 @@ class SakuraEffect : AtmosphereEffect {
 
     private var intensity: Float = 1f
     private var speedScale: Float = 1f
+    /** Typing-flow gain on top of [speedScale]: `1` at rest, up to `1 + FLOW_SPEED_BOOST` while typing fast. */
+    private var flowBoost: Float = 1f
     private var populationChanged = false
 
     private val x = FloatArray(MAX_PARTICLES)
@@ -64,6 +74,9 @@ class SakuraEffect : AtmosphereEffect {
     private val prevY = FloatArray(MAX_PARTICLES)
     private val prevRotation = FloatArray(MAX_PARTICLES)
     private val prevAlpha = FloatArray(MAX_PARTICLES)
+
+    // Ticks since the petal was last committed (reported dirty); bounds how long motion may stay un-painted.
+    private val staleTicks = IntArray(MAX_PARTICLES)
 
     private val colors = arrayOfNulls<Color>(ALPHA_STEPS)
     private val cursorAvoidance = CursorAvoidance(MAX_PARTICLES)
@@ -130,7 +143,7 @@ class SakuraEffect : AtmosphereEffect {
         particleCount = 0
         lastWidth = -1
         lastHeight = -1
-        speedMultiplier = speedScale
+        speedMultiplier = speedScale * flowBoost
         glow = 0f
         failureGlow = 0f
         gustDirection = 0f
@@ -173,11 +186,24 @@ class SakuraEffect : AtmosphereEffect {
 
     override fun setSpeedScale(scale: Float) {
         speedScale = if (scale.isFinite()) scale.coerceIn(0.3f, 2f) else 1f
-        speedMultiplier = speedEnvelope.value * speedScale
+        speedMultiplier = speedEnvelope.value * speedScale * flowBoost
+    }
+
+    override fun setFlow(level: Float) {
+        flowBoost = 1f + AtmosphereEffect.FLOW_SPEED_BOOST * (if (level.isFinite()) level.coerceIn(0f, 1f) else 0f)
+        speedMultiplier = speedEnvelope.value * speedScale * flowBoost
     }
 
     override fun onPointerChanged(x: Float, y: Float, inside: Boolean) {
         cursorAvoidance.setPointer(x, y, inside)
+    }
+
+    override fun onPointerPressed(x: Float, y: Float) {
+        cursorAvoidance.burst(x, y, uiScale, particleCount, this.x, this.y)
+    }
+
+    override fun setPointerMode(mode: PointerMode) {
+        cursorAvoidance.mode = mode
     }
 
     override fun onEvent(event: AtmosphereEvent) {
@@ -214,7 +240,7 @@ class SakuraEffect : AtmosphereEffect {
             populationChanged = false
         }
 
-        speedMultiplier = speedEnvelope.advance(deltaSeconds) * speedScale
+        speedMultiplier = speedEnvelope.advance(deltaSeconds) * speedScale * flowBoost
         glow = glowEnvelope.advance(deltaSeconds)
         failureGlow = failureEnvelope.advance(deltaSeconds)
         if (failureEnvelope.phase == AdsrEnvelope.Phase.IDLE) gustDirection = 0f
@@ -255,13 +281,15 @@ class SakuraEffect : AtmosphereEffect {
             alpha[i] = min(1f, baseAlpha[i] * intensity * pulse * envelope * opacityScale) * failureDim
 
             // Dirty reporting
-            val moved = abs(x[i] - prevX[i]) >= MOVE_EPSILON || abs(y[i] - prevY[i]) >= MOVE_EPSILON
-            // For rotation, we use a simple epsilon. A rotation of R moves a point at radius S by approx S*R.
-            val rotated = abs(rotation[i] - prevRotation[i]) * size[i] >= MOVE_EPSILON
-            val faded = alphaIndex(alpha[i]) != alphaIndex(prevAlpha[i])
+            // A rotation of R moves a point at radius S by approx S*R, so it is treated as extra horizontal displacement.
+            val turn = abs(rotation[i] - prevRotation[i]) * size[i]
+            val dx = max(abs(x[i] - prevX[i]), turn)
+            val alphaDelta = abs(alphaIndex(alpha[i]) - alphaIndex(prevAlpha[i]))
 
-            if (moved || rotated || faded) {
+            if (CommitPolicy.shouldCommit(dx, y[i] - prevY[i], alphaDelta, staleTicks[i])) {
                 changed = emitDirty(dirty, i, boundingRadius(i) + 1f) or changed
+            } else {
+                staleTicks[i]++
             }
         }
         return changed
@@ -333,6 +361,7 @@ class SakuraEffect : AtmosphereEffect {
             prevY[i] = y[i]
             prevRotation[i] = rotation[i]
             prevAlpha[i] = 0f
+            staleTicks[i] = 0
         }
         var changed = false
         for (i in target until previous) {
@@ -350,6 +379,7 @@ class SakuraEffect : AtmosphereEffect {
 
     private fun spawn(i: Int, bx: Float, by: Float, bw: Float) {
         cursorAvoidance.reset(i)
+        staleTicks[i] = 0
         x[i] = bx + random.nextFloat() * bw
         y[i] = by - EDGE_MARGIN * uiScale // Spawn above top
         vx[i] = (random.nextFloat() * 2f - 1f) * 5f * uiScale // Small initial horizontal drift
@@ -378,6 +408,7 @@ class SakuraEffect : AtmosphereEffect {
     }
 
     private fun emitDirty(dirty: DirtyRegionCollector, i: Int, padding: Float): Boolean {
+        staleTicks[i] = 0
         if (prevAlpha[i] <= 0f && alpha[i] <= 0f) {
             prevX[i] = x[i]
             prevY[i] = y[i]
@@ -408,6 +439,7 @@ class SakuraEffect : AtmosphereEffect {
         prevY[i] = y[i]
         prevRotation[i] = rotation[i]
         prevAlpha[i] = 0f
+        staleTicks[i] = 0
         return visible
     }
 
@@ -436,6 +468,7 @@ class SakuraEffect : AtmosphereEffect {
         prevY[index] = py
         prevRotation[index] = rotation
         prevAlpha[index] = alpha
+        staleTicks[index] = 0
     }
 
     @TestOnly
@@ -469,7 +502,6 @@ class SakuraEffect : AtmosphereEffect {
         const val ACTIVITY_SPEED: Float = 1.6f
 
         const val ALPHA_STEPS: Int = 256
-        const val MOVE_EPSILON: Float = 0.02f
         
         const val SWAY_AMPLITUDE: Float = 20f
         const val MAX_ANGULAR_VELOCITY: Float = 1.5f

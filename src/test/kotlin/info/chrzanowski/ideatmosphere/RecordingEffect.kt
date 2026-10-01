@@ -4,6 +4,7 @@ import info.chrzanowski.ideatmosphere.core.AtmosphereEffect
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
 import info.chrzanowski.ideatmosphere.core.AtmospherePalette
 import info.chrzanowski.ideatmosphere.core.EffectContext
+import info.chrzanowski.ideatmosphere.core.PointerMode
 import info.chrzanowski.ideatmosphere.render.DirtyRegionCollector
 import java.awt.Color
 import java.awt.Graphics2D
@@ -26,9 +27,17 @@ open class RecordingEffect(override val id: String = "recording") : AtmosphereEf
     var context: EffectContext? = null
     var lastIntensity = 1f
     var lastSpeedScale = 1f
+    var lastFlow = 0f
+
+    /** Every flow level received, in order. */
+    val flows = ArrayList<Float>()
     var pointerX = 0f
     var pointerY = 0f
     var pointerInside = false
+    var lastPointerMode = PointerMode.AVOID
+
+    /** Root-pane coordinates of every observed mouse press, as (x, y) pairs. */
+    val presses = ArrayList<Pair<Float, Float>>()
 
     /** Regions (x, y, w, h) reported on each update; empty list → update returns `false`. */
     val regions = ArrayList<FloatArray>()
@@ -70,11 +79,24 @@ open class RecordingEffect(override val id: String = "recording") : AtmosphereEf
         pointerInside = inside
     }
 
+    override fun onPointerPressed(x: Float, y: Float) {
+        presses.add(x to y)
+    }
+
+    override fun setPointerMode(mode: PointerMode) {
+        lastPointerMode = mode
+    }
+
     override fun setIntensity(scale: Float) {
         lastIntensity = scale
     }
 
     override fun setSpeedScale(scale: Float) {
         lastSpeedScale = scale
+    }
+
+    override fun setFlow(level: Float) {
+        lastFlow = level
+        flows.add(level)
     }
 }

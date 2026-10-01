@@ -1,0 +1,7 @@
+<!-- Loaded only when the IDE has version control support (com.intellij.modules.vcs). -->
+<idea-plugin>
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Commit outcome: SUCCESS when the commit went through, FAILURE when it failed. -->
+        <checkinHandlerFactory implementation="info.chrzanowski.ideatmosphere.events.VcsActivityProducer"/>
+    </extensions>
+</idea-plugin>

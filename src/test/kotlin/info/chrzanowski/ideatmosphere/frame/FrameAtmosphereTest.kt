@@ -9,6 +9,7 @@ import info.chrzanowski.ideatmosphere.RecordingEffect
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
 import info.chrzanowski.ideatmosphere.core.AtmospherePalette
 import info.chrzanowski.ideatmosphere.core.EffectContext
+import info.chrzanowski.ideatmosphere.core.PointerMode
 import info.chrzanowski.ideatmosphere.render.AtmospherePainter
 import java.awt.Color
 import java.awt.Rectangle
@@ -122,12 +123,15 @@ class FrameAtmosphereTest : BasePlatformTestCase() {
         rootPane.dispatchEvent(move)
         assertTrue(effect.pointerInside)
         assertFalse(move.isConsumed)
-        atmosphere.cursorAvoidanceEnabled = false
+        atmosphere.pointerMode = PointerMode.OFF
+        assertEquals(PointerMode.OFF, effect.lastPointerMode)
         assertFalse(atmosphere.isPointerTracking)
         assertFalse(effect.pointerInside)
         atmosphere.observePointer(move)
         assertFalse(effect.pointerInside)
-        atmosphere.cursorAvoidanceEnabled = true
+        atmosphere.pointerMode = PointerMode.ATTRACT
+        assertEquals(PointerMode.ATTRACT, effect.lastPointerMode)
+        assertTrue(atmosphere.isPointerTracking)
         atmosphere.observePointer(move)
         assertTrue(effect.pointerInside)
         atmosphere.paused = true
@@ -147,6 +151,45 @@ class FrameAtmosphereTest : BasePlatformTestCase() {
         Disposer.dispose(parent)
         assertFalse(atmosphere.isPointerTracking)
         assertFalse(atmosphere.isAttached)
+    }
+
+    fun `test mouse press is observed as a burst but never consumed`() {
+        val atmosphere = newAtmosphere(FakeTarget())
+        atmosphere.attach(parent)
+        val child = JPanel()
+        rootPane.layeredPane.add(child)
+        child.setBounds(30, 40, 100, 100)
+
+        val press = MouseEvent(child, MouseEvent.MOUSE_PRESSED, 0L, 0, 10, 20, 1, false, MouseEvent.BUTTON1)
+        atmosphere.observePointer(press)
+        assertEquals(listOf(40f to 60f), effect.presses)
+        assertTrue(effect.pointerInside)
+        assertFalse(press.isConsumed)
+
+        // Dispatched through the real toolkit queue the passive listener sees it too, and the IDE still gets it.
+        val dispatched = MouseEvent(rootPane, MouseEvent.MOUSE_PRESSED, 0L, 0, 100, 100, 1, false, MouseEvent.BUTTON1)
+        rootPane.dispatchEvent(dispatched)
+        assertEquals(2, effect.presses.size)
+        assertEquals(100f to 100f, effect.presses.last())
+        assertFalse(dispatched.isConsumed)
+
+        // Releases, clicks and moves are not bursts; a press outside the frame is not either.
+        atmosphere.observePointer(MouseEvent(child, MouseEvent.MOUSE_RELEASED, 0L, 0, 10, 20, 1, false, MouseEvent.BUTTON1))
+        atmosphere.observePointer(MouseEvent(child, MouseEvent.MOUSE_CLICKED, 0L, 0, 10, 20, 1, false, MouseEvent.BUTTON1))
+        atmosphere.observePointer(MouseEvent(child, MouseEvent.MOUSE_MOVED, 0L, 0, 10, 20, 0, false))
+        atmosphere.observePointer(MouseEvent(rootPane, MouseEvent.MOUSE_PRESSED, 0L, 0, -5, 20, 1, false, MouseEvent.BUTTON1))
+        assertEquals(2, effect.presses.size)
+
+        // Reduce Motion drops the burst but keeps following the pointer; Off drops everything.
+        atmosphere.reduceMotion = true
+        atmosphere.observePointer(press)
+        assertEquals(2, effect.presses.size)
+        assertTrue(effect.pointerInside)
+        atmosphere.reduceMotion = false
+        atmosphere.pointerMode = PointerMode.OFF
+        atmosphere.observePointer(press)
+        assertEquals(2, effect.presses.size)
+        assertFalse(effect.pointerInside)
     }
 
     fun `test attach registers the painter and shows the glass pane`() {
@@ -592,6 +635,44 @@ class FrameAtmosphereTest : BasePlatformTestCase() {
         atmosphere.detach()
         assertFalse(atmosphere.lastTickWasFade)
         assertEquals(0, atmosphere.lastRectCount)
+    }
+
+    fun `test flow reaches the effect only while attached and is zero under reduce motion`() {
+        val atmosphere = newAtmosphere()
+        atmosphere.setFlow(0.5f)
+        assertTrue("not attached: nothing forwarded", effect.flows.isEmpty())
+
+        atmosphere.attach(parent)
+        atmosphere.setFlow(0.5f)
+        assertEquals(listOf(0.5f), effect.flows)
+
+        atmosphere.reduceMotion = true
+        assertEquals("switching reduce motion on zeroes the flow at once", 0f, effect.lastFlow)
+        atmosphere.setFlow(0.8f)
+        assertEquals(0f, effect.lastFlow)
+
+        atmosphere.reduceMotion = false
+        atmosphere.setFlow(0.8f)
+        assertEquals(0.8f, effect.lastFlow)
+
+        atmosphere.detach()
+        atmosphere.setFlow(0.3f)
+        assertEquals(0.8f, effect.lastFlow)
+    }
+
+    fun `test reduce motion drops success and failure but keeps every other event`() {
+        val atmosphere = newAtmosphere()
+        atmosphere.attach(parent)
+        atmosphere.reduceMotion = true
+
+        for (event in AtmosphereEvent.entries) atmosphere.publish(event)
+
+        assertEquals(AtmosphereEvent.entries - AtmosphereEvent.SUCCESS - AtmosphereEvent.FAILURE, effect.events)
+
+        atmosphere.reduceMotion = false
+        atmosphere.publish(AtmosphereEvent.SUCCESS)
+        atmosphere.publish(AtmosphereEvent.FAILURE)
+        assertEquals(listOf(AtmosphereEvent.SUCCESS, AtmosphereEvent.FAILURE), effect.events.takeLast(2))
     }
 
     fun `test events and palette changes reach the effect only while attached`() {

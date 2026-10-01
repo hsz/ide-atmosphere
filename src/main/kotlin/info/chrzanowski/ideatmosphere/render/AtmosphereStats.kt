@@ -10,7 +10,8 @@ import java.util.concurrent.TimeUnit
  * Logged line: ticks in the period, effective FPS, governed FPS, rate mode (`normal` / `calm` / `fading`
  * as of the last tick), average/max tick cost, average rectangles per tick split into content rectangles painted
  * inside the nested batch (`nested`) and directly (`direct`), and average painted user-space pixels per tick.
- * A healthy batch shows `nested ≈ rects − 1`.
+ * A healthy batch shows `nested ≈ rects − 1`. `rects/s` is the absolute number of dirty rectangles per second:
+ * the quantity the painting cost is proportional to, handy for comparing commit policies on the same IDE frame.
  */
 class AtmosphereStats(
     val enabled: Boolean = System.getProperty(DEBUG_PROPERTY, "false").toBoolean(),
@@ -32,6 +33,14 @@ class AtmosphereStats(
 
     /** Number of log lines emitted so far (tests). */
     var reports: Long = 0
+        private set
+
+    /** The most recently logged line (tests). */
+    var lastReport: String? = null
+        private set
+
+    /** Dirty rectangles per second in the most recently reported period (tests). */
+    var lastRectsPerSecond: Double = 0.0
         private set
 
     fun recordTick(
@@ -79,13 +88,15 @@ class AtmosphereStats(
         val avgDirect = if (ticks > 0) totalDirect.toDouble() / ticks else 0.0
         val avgPixels = if (ticks > 0) totalPixels.toDouble() / ticks else 0.0
         val cpuPercent = if (seconds > 0) totalCostMicros / (seconds * 10_000.0) else 0.0
+        val rectsPerSecond = if (seconds > 0) totalRects / seconds else 0.0
         reports++
-        logger.info(
-            String.format(
-                "atmosphere: ticks=%d fps=%.1f (governed %d, %s) tick avg=%.0fµs max=%dµs rects/tick=%.1f (nested %.1f, direct %.1f) px/tick=%.0f cpu≈%.2f%%",
-                ticks, effectiveFps, lastGovernedFps, lastMode, avgCost, maxCostMicros, avgRects, avgNested, avgDirect, avgPixels, cpuPercent,
-            )
+        lastRectsPerSecond = rectsPerSecond
+        val line = String.format(
+            "atmosphere: ticks=%d fps=%.1f (governed %d, %s) tick avg=%.0fµs max=%dµs rects/tick=%.1f rects/s=%.0f (nested %.1f, direct %.1f) px/tick=%.0f cpu≈%.2f%%",
+            ticks, effectiveFps, lastGovernedFps, lastMode, avgCost, maxCostMicros, avgRects, rectsPerSecond, avgNested, avgDirect, avgPixels, cpuPercent,
         )
+        lastReport = line
+        logger.info(line)
     }
 
     companion object {

@@ -11,6 +11,7 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.IdeFrame
+import com.intellij.ui.JBColor
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import info.chrzanowski.ideatmosphere.core.AtmosphereEffect
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
@@ -19,21 +20,29 @@ import info.chrzanowski.ideatmosphere.core.EffectContext
 import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
 import info.chrzanowski.ideatmosphere.effects.fireflies.FirefliesEffect
 import info.chrzanowski.ideatmosphere.events.IdleActivityProducer
+import info.chrzanowski.ideatmosphere.events.TypingRhythmProducer
 import info.chrzanowski.ideatmosphere.frame.FrameAtmosphere
 import info.chrzanowski.ideatmosphere.render.AtmosphereTicker
 import info.chrzanowski.ideatmosphere.settings.AtmosphereSettingsState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import org.jetbrains.annotations.TestOnly
+import java.awt.AWTEvent
 import java.util.EnumSet
 import java.util.HashMap
 import javax.swing.JRootPane
 import javax.swing.SwingUtilities
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Application-level owner of everything atmosphere-related: the registry of project frames, the shared
- * [AtmosphereTicker], the persisted enabled flag, pause reasons, event fan-out and the [IdleActivityProducer]
- * (running while the plugin is enabled and at least one frame is registered).
+ * [AtmosphereTicker], the persisted enabled flag, pause reasons, event fan-out, the [IdleActivityProducer] and the
+ * [TypingRhythmProducer] (both running while the plugin is enabled and at least one frame is registered).
  *
  * Every project frame is [attach]ed once (by `AtmosphereProjectActivity`) and stays registered until the
  * project closes ([detach], or disposal of the `parent` passed to [attach]). While the plugin is disabled the
@@ -51,8 +60,11 @@ class AtmosphereManager(
     val coroutineScope: CoroutineScope,
 ) : Disposable {
 
-    /** Why the animation is currently frozen. Several reasons may be active at once. */
-    enum class PauseReason { POWER_SAVE }
+    /**
+     * Why the animation is currently frozen. Several reasons may be active at once.
+     * [USER_SNOOZE] is set by [snooze] and never persisted: it ends after the snooze duration or on [resumeFromSnooze].
+     */
+    enum class PauseReason { POWER_SAVE, USER_SNOOZE }
 
     private class Registration(
         val rootPane: JRootPane,
@@ -69,10 +81,29 @@ class AtmosphereManager(
     private val pauseReasons: EnumSet<PauseReason> = EnumSet.noneOf(PauseReason::class.java)
     private var disposed = false
     private var idleJob: Job? = null
+    private var snoozeJob: Job? = null
+    private var typingJob: Job? = null
+    private var typingAttached = false
+    private val changeListeners = ArrayList<() -> Unit>()
+
+    /** Keystroke rhythm → flow level; forwards level changes to the frames and polls the decay while non-zero. */
+    private val typingProducer = TypingRhythmProducer(onLevelChanged = ::onFlowChanged)
+
+    /** Dark/light decision of the current theme; replaceable so tests need no LaF switch. */
+    internal var isDarkTheme: () -> Boolean = { !JBColor.isBright() }
 
     /** Created lazily so merely loading the service (e.g. from an application listener) allocates no timer. */
-    private val tickerDelegate = lazy { AtmosphereTicker().also { it.onAllDormant = ::updateTicker } }
+    private val tickerDelegate = lazy {
+        AtmosphereTicker().also {
+            it.onAllDormant = ::updateTicker
+            it.reduceMotion = AtmosphereSettingsState.getInstance().state.reduceMotion
+        }
+    }
     val ticker: AtmosphereTicker by tickerDelegate
+
+    /** Wall-clock millis at which the current snooze ends, or `0` when not snoozed. */
+    var snoozeEndsAtMillis: Long = 0L
+        private set
 
     /** `false` while the IDE application is deactivated (frames fade out and go dormant). */
     var isApplicationActive: Boolean = true
@@ -96,9 +127,30 @@ class AtmosphereManager(
             }
             updateTicker()
             updateIdleProducer()
+            updateTypingProducer()
         }
 
     val isPaused: Boolean get() = pauseReasons.isNotEmpty()
+
+    /** `true` while the user's snooze (see [snooze]) is active. */
+    val isSnoozed: Boolean get() = PauseReason.USER_SNOOZE in pauseReasons
+
+    /** Id of the effect that applies to the current theme brightness (per-theme preset or the general effect). */
+    val currentEffectId: String
+        get() = AtmosphereSettingsState.getInstance().state.normalized().effectIdFor(isDarkTheme())
+
+    /**
+     * Registers [listener] to be called after the user-visible state changed (effect, snooze, settings); it is removed
+     * when [parent] is disposed. Used by the status bar widget to refresh itself.
+     */
+    fun addChangeListener(parent: Disposable, listener: () -> Unit) {
+        changeListeners.add(listener)
+        Disposer.register(parent) { changeListeners.remove(listener) }
+    }
+
+    private fun notifyChanged() {
+        for (listener in changeListeners.toList()) listener()
+    }
 
     /** Projects currently registered (attached or waiting for re-enable). */
     val projects: Set<Project> get() = registrations.keys
@@ -109,6 +161,21 @@ class AtmosphereManager(
     /** `true` while the idle/active producer is collecting `IdleTracker` events. */
     val isIdleProducerRunning: Boolean get() = idleJob?.isActive == true
 
+    /** `true` while keystrokes are observed for the typing flow. */
+    val isTypingProducerRunning: Boolean get() = typingAttached
+
+    /** Current typing flow level in `0..1` as last forwarded to the frames. */
+    val flowLevel: Float get() = typingProducer.level
+
+    /**
+     * Feeds [event] to the typing observer as the toolkit would. Tests cannot route a key event through a focus
+     * owner, so they call this instead of dispatching; a no-op while the typing producer is not running.
+     */
+    @TestOnly
+    internal fun observeKeyForTest(event: AWTEvent) {
+        if (typingAttached) typingProducer.observe(event)
+    }
+
     /** Registers the project's main [frame]; a no-op when the frame has no root pane or the project is known. */
     @RequiresEdt
     fun attach(project: Project, frame: IdeFrame, parent: Disposable) {
@@ -118,7 +185,7 @@ class AtmosphereManager(
             return
         }
         val state = AtmosphereSettingsState.getInstance().state
-        attach(project, rootPane, parent, AtmosphereEffects.createOrDefault(state.effectId))
+        attach(project, rootPane, parent, AtmosphereEffects.createOrDefault(state.effectIdFor(isDarkTheme())))
     }
 
     /**
@@ -142,6 +209,7 @@ class AtmosphereManager(
         if (isEnabled) activate(registration)
         updateTicker()
         updateIdleProducer()
+        updateTypingProducer()
     }
 
     /** Stops and forgets the atmosphere of [project]. Safe to call for unknown projects and more than once. */
@@ -152,6 +220,7 @@ class AtmosphereManager(
         deactivate(registration)
         updateTicker()
         updateIdleProducer()
+        updateTypingProducer()
     }
 
     /**
@@ -207,6 +276,27 @@ class AtmosphereManager(
         finishActivity(project, null)
     }
 
+    /**
+     * Plays a `SUCCESS` / `FAILURE` reaction on the frame of [project] for an outcome that has no activity of its own
+     * (test results, commits, pushes). Respects `reactToActivity` and never touches the activity counters.
+     */
+    @RequiresEdt
+    fun publishOutcome(project: Project, success: Boolean) {
+        if (disposed) return
+        if (!AtmosphereSettingsState.getInstance().state.reactToActivity) return
+        publish(if (success) AtmosphereEvent.SUCCESS else AtmosphereEvent.FAILURE, project)
+    }
+
+    /**
+     * Pushes the typing flow level (`0..1`) to every attached frame; the [TypingRhythmProducer] calls this through
+     * [onFlowChanged], and tests may call it directly.
+     */
+    @RequiresEdt
+    fun setFlow(level: Float) {
+        if (disposed) return
+        for (registration in registrations.values) registration.atmosphere?.setFlow(level)
+    }
+
     private fun finishActivity(project: Project, outcome: AtmosphereEvent?) {
         if (disposed) return
         val state = AtmosphereSettingsState.getInstance().state
@@ -227,12 +317,17 @@ class AtmosphereManager(
         if (outcome != null) publish(outcome, project)
     }
 
-    /** Recomputes the palette from the current LaF and pushes it to every attached effect. */
+    /**
+     * The theme changed: switches to the per-theme effect when one is configured, recomputes the palette from the
+     * current LaF and pushes it to every attached effect.
+     */
     @RequiresEdt
     fun refreshPalette() {
-        if (registrations.isEmpty()) return
+        if (registrations.isEmpty() || disposed) return
+        swapEffects(AtmosphereSettingsState.getInstance().state.effectIdFor(isDarkTheme()))
         val palette = AtmospherePalette.fromCurrentLaf()
         for (registration in registrations.values) registration.atmosphere?.paletteChanged(palette)
+        notifyChanged()
     }
 
     /** Freezes (or resumes) the animation for [reason]; the ticker stops while any reason is active. */
@@ -243,6 +338,33 @@ class AtmosphereManager(
         val frozen = isPaused
         for (registration in registrations.values) registration.atmosphere?.paused = frozen
         updateTicker()
+        notifyChanged()
+    }
+
+    /**
+     * Freezes the animation for [duration] (one hour by default) via [PauseReason.USER_SNOOZE], then resumes it.
+     * Snoozing again restarts the countdown; the snooze is not persisted, so a restart ends it.
+     */
+    @RequiresEdt
+    fun snooze(duration: Duration = SNOOZE_DURATION) {
+        if (disposed) return
+        snoozeJob?.cancel()
+        snoozeEndsAtMillis = System.currentTimeMillis() + duration.inWholeMilliseconds
+        snoozeJob = coroutineScope.launch(Dispatchers.UI) {
+            delay(duration)
+            snoozeJob = null
+            resumeFromSnooze()
+        }
+        setPaused(PauseReason.USER_SNOOZE, true)
+    }
+
+    /** Ends a running [snooze] immediately; a no-op when not snoozed. */
+    @RequiresEdt
+    fun resumeFromSnooze() {
+        snoozeJob?.cancel()
+        snoozeJob = null
+        snoozeEndsAtMillis = 0L
+        setPaused(PauseReason.USER_SNOOZE, false)
     }
 
     /**
@@ -270,19 +392,22 @@ class AtmosphereManager(
         if (disposed) return
         val state = AtmosphereSettingsState.getInstance().state
 
-        // 1. Theme (effectId)
-        setEffectId(state.effectId)
+        // 1. Effect: the per-theme preset of the current theme brightness, else the general effect
+        swapEffects(state.effectIdFor(isDarkTheme()))
 
-        // 2. Intensity & Speed
+        // 2. Intensity & Speed, Reduce Motion (slower speed, capped FPS, no bursts/gusts)
+        if (tickerDelegate.isInitialized()) ticker.reduceMotion = state.reduceMotion
         for (registration in registrations.values) {
             val atmosphere = registration.atmosphere ?: continue
             atmosphere.effect.setIntensity(state.intensity)
-            atmosphere.effect.setSpeedScale(state.speed)
-            atmosphere.cursorAvoidanceEnabled = state.avoidMouse
+            atmosphere.effect.setSpeedScale(state.effectiveSpeed())
+            atmosphere.reduceMotion = state.reduceMotion
+            atmosphere.pointerMode = state.pointerMode
         }
 
-        // 3. React to activity
+        // 3. React to activity and typing
         updateIdleProducer()
+        updateTypingProducer()
 
         // 4. Pause on focus loss
         if (!state.pauseOnFocusLoss) {
@@ -291,16 +416,29 @@ class AtmosphereManager(
             for (registration in registrations.values) registration.atmosphere?.setVisible(isApplicationActive)
         }
         updateTicker()
+        notifyChanged()
     }
 
     /**
-     * Changes the active theme for all registered frames.
+     * Switches the effect of the current theme brightness to [id] for all registered frames and remembers it: the
+     * per-theme preset of the current brightness when one is configured, the general effect otherwise.
      */
     @RequiresEdt
     fun setEffectId(id: String) {
         if (disposed) return
-        AtmosphereSettingsState.getInstance().state.effectId = id
+        val state = AtmosphereSettingsState.getInstance().state
+        val dark = isDarkTheme()
+        when {
+            dark && state.darkEffectId != null -> state.darkEffectId = id
+            !dark && state.lightEffectId != null -> state.lightEffectId = id
+            else -> state.effectId = id
+        }
+        swapEffects(id)
+        notifyChanged()
+    }
 
+    /** Replaces the effect of every registration that does not run [id] yet; keeps the frames' enabled state. */
+    private fun swapEffects(id: String) {
         for (registration in registrations.values) {
             if (registration.effect.id == id) continue
 
@@ -312,7 +450,11 @@ class AtmosphereManager(
 
     override fun dispose() {
         disposed = true
+        snoozeJob?.cancel()
+        snoozeJob = null
+        changeListeners.clear()
         stopIdleProducer()
+        stopTypingProducer()
         for (registration in registrations.values) deactivate(registration)
         registrations.clear()
         updateTicker()
@@ -336,7 +478,7 @@ class AtmosphereManager(
         val attachDisposable = Disposer.newDisposable(registration.parent, "IDE Atmosphere frame")
         val state = AtmosphereSettingsState.getInstance().state
         registration.effect.setIntensity(state.intensity)
-        registration.effect.setSpeedScale(state.speed)
+        registration.effect.setSpeedScale(state.effectiveSpeed())
         val atmosphere = FrameAtmosphere(
             rootPane = registration.rootPane,
             effect = registration.effect,
@@ -344,7 +486,8 @@ class AtmosphereManager(
             maxParticles = FirefliesEffect.MAX_PARTICLES,
         )
         atmosphere.paused = isPaused
-        atmosphere.cursorAvoidanceEnabled = state.avoidMouse
+        atmosphere.reduceMotion = state.reduceMotion
+        atmosphere.pointerMode = state.pointerMode
         // Before attach the opacity snaps: a frame that appears while the IDE is in the background starts dormant.
         atmosphere.setVisible(isApplicationActive || !state.pauseOnFocusLoss)
         atmosphere.attach(attachDisposable)
@@ -392,8 +535,48 @@ class AtmosphereManager(
         if (tickerDelegate.isInitialized()) ticker.calm = false
     }
 
+    private fun updateTypingProducer() {
+        val state = AtmosphereSettingsState.getInstance().state
+        val shouldRun = !disposed && isEnabled && registrations.isNotEmpty() && state.reactToActivity && state.reactToTyping
+        if (shouldRun) {
+            if (!typingAttached) {
+                typingProducer.attach()
+                typingAttached = true
+            }
+        } else {
+            stopTypingProducer()
+        }
+    }
+
+    private fun stopTypingProducer() {
+        typingJob?.cancel()
+        typingJob = null
+        if (typingAttached) {
+            typingAttached = false
+            typingProducer.detach() // resets the level, which forwards 0 to the frames
+        }
+    }
+
+    /** Forwards a flow change and keeps polling the decay (every [FLOW_POLL_INTERVAL]) until the level settles. */
+    private fun onFlowChanged(level: Float) {
+        setFlow(level)
+        if (level <= 0f || disposed || typingJob?.isActive == true) return
+        typingJob = coroutineScope.launch(Dispatchers.UI) {
+            while (!typingProducer.isSettled) {
+                delay(FLOW_POLL_INTERVAL)
+                typingProducer.sample()
+            }
+        }
+    }
+
     companion object {
         const val ENABLED_KEY: String = "ide.atmosphere.enabled"
+
+        /** Length of the status bar's "Pause for 1 hour". */
+        val SNOOZE_DURATION: Duration = 1.hours
+
+        /** How often the typing flow decay is sampled while the level is above zero. */
+        val FLOW_POLL_INTERVAL: Duration = 100.milliseconds
 
         private val LOG = Logger.getInstance(AtmosphereManager::class.java)
 

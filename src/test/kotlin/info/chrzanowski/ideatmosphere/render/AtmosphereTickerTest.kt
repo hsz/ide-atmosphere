@@ -126,6 +126,22 @@ class AtmosphereTickerTest : BasePlatformTestCase() {
         assertEquals(250, slow.intervalMillis)
     }
 
+    fun `test reduce motion caps the governed rate at 10 fps but never raises it`() {
+        val ticker = newTicker()
+        ticker.reduceMotion = true
+        assertEquals(100, ticker.intervalMillis)
+        ticker.calm = true
+        assertEquals(100, ticker.intervalMillis)
+        ticker.calm = false
+        ticker.reduceMotion = false
+        assertEquals(33, ticker.intervalMillis)
+
+        // A governor already slower than the reduced-motion cap is left alone.
+        val slow = newTicker(FrameBudgetGovernor(minFps = 4, initialFps = 4))
+        slow.reduceMotion = true
+        assertEquals(250, slow.intervalMillis)
+    }
+
     fun `test onAllDormant fires once when every frame has faded out and re-arms after activation`() {
         val ticker = newTicker()
         ticker.add(frame)
@@ -236,7 +252,7 @@ class AtmosphereTickerTest : BasePlatformTestCase() {
     }
 
     private companion object {
-        /** 6 ms per tick: over the 100 ms/s budget at 30 fps, so the governor must fall back to its 20 fps floor. */
+        /** 6 ms per tick: over the 70 ms/s budget at 30 fps, so the governor must fall back to its 20 fps floor. */
         const val SLOW_TICK_NANOS = 6_000_000L
     }
 }

@@ -7,6 +7,7 @@ import info.chrzanowski.ideatmosphere.core.AtmosphereEffect
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
 import info.chrzanowski.ideatmosphere.core.AtmospherePalette
 import info.chrzanowski.ideatmosphere.core.EffectContext
+import info.chrzanowski.ideatmosphere.core.PointerMode
 import info.chrzanowski.ideatmosphere.render.AtmospherePainter
 import info.chrzanowski.ideatmosphere.render.DirtyRegionCollector
 import java.awt.Frame
@@ -85,11 +86,26 @@ class FrameAtmosphere(
             if (value) clearPointer()
         }
 
-    var cursorAvoidanceEnabled: Boolean = true
+    /**
+     * Reduce Motion: the `SUCCESS` / `FAILURE` reactions (bursts and gusts) are not forwarded to the effect; every
+     * other event still is, so the slowed-down base motion keeps following idle and activity.
+     */
+    var reduceMotion: Boolean = false
         set(value) {
             field = value
+            if (value && attached) effect.setFlow(0f)
+        }
+
+    /**
+     * How the effect reacts to the pointer. The pointer (and clicks, see [observePointer]) is observed through a
+     * passive `AWTEventListener` only while the mode is not [PointerMode.OFF]; such listeners cannot consume events.
+     */
+    var pointerMode: PointerMode = PointerMode.AVOID
+        set(value) {
+            field = value
+            effect.setPointerMode(value)
             updatePointerTracking()
-            if (!value) clearPointer()
+            if (value == PointerMode.OFF) clearPointer()
         }
 
     internal var isPointerTracking: Boolean = false
@@ -195,7 +211,7 @@ class FrameAtmosphere(
     }
 
     private fun updatePointerTracking() {
-        val tracking = attached && cursorAvoidanceEnabled
+        val tracking = attached && pointerMode != PointerMode.OFF
         if (tracking == isPointerTracking) return
         val toolkit = Toolkit.getDefaultToolkit()
         if (tracking) {
@@ -206,8 +222,12 @@ class FrameAtmosphere(
         isPointerTracking = tracking
     }
 
+    /**
+     * Forwards the pointer position (and, for `MOUSE_PRESSED`, a click burst) to the effect. Observation only: the
+     * event is never consumed or altered. Bursts are skipped under [reduceMotion].
+     */
     internal fun observePointer(event: MouseEvent) {
-        if (!attached || !cursorAvoidanceEnabled) return
+        if (!attached || pointerMode == PointerMode.OFF) return
         val component = event.component
         if (paused || !isVisible || !target.isPaintable || component == null ||
             !SwingUtilities.isDescendingFrom(component, rootPane)) {
@@ -216,7 +236,10 @@ class FrameAtmosphere(
         }
         val point = SwingUtilities.convertPoint(component, event.point, rootPane)
         val inside = point.x >= 0 && point.y >= 0 && point.x < rootPane.width && point.y < rootPane.height
-        effect.onPointerChanged(point.x.toFloat(), point.y.toFloat(), inside)
+        val x = point.x.toFloat()
+        val y = point.y.toFloat()
+        effect.onPointerChanged(x, y, inside)
+        if (inside && !reduceMotion && event.id == MouseEvent.MOUSE_PRESSED) effect.onPointerPressed(x, y)
     }
 
     private fun snapOpacity() {
@@ -275,7 +298,15 @@ class FrameAtmosphere(
     }
 
     fun publish(event: AtmosphereEvent) {
-        if (attached) effect.onEvent(event)
+        if (!attached) return
+        if (reduceMotion && (event == AtmosphereEvent.SUCCESS || event == AtmosphereEvent.FAILURE)) return
+        effect.onEvent(event)
+    }
+
+    /** Typing flow in `0..1`; under [reduceMotion] the effect always sees `0` so the slowed motion stays steady. */
+    fun setFlow(level: Float) {
+        if (!attached) return
+        effect.setFlow(if (reduceMotion) 0f else level)
     }
 
     fun paletteChanged(palette: AtmospherePalette) {

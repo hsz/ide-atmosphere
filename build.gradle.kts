@@ -21,8 +21,8 @@ dependencies {
         intellijIdea("2025.3.6.1")
         testFramework(TestFrameworkType.Platform)
 
-        // Add plugin dependencies for compilation here, for example:
-        // bundledPlugin("com.intellij.java")
+        // Optional at runtime (see <depends optional="true"> in plugin.xml): push reactions need the Git integration.
+        bundledPlugin("Git4Idea")
     }
 }
 
