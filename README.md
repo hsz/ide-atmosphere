@@ -168,6 +168,10 @@ background.
 | `./gradlew verifyPlugin` | Plugin Verifier against the configured IDE versions |
 | `./gradlew build` | Compile, test and package |
 | `./gradlew test --tests '*MarketplaceMediaGenerator' -Pide.atmosphere.media.dir=docs/media` | Re-render the screenshots and GIFs in `docs/media` (skipped in ordinary test runs) |
+| `./gradlew signPlugin` / `publishPlugin` | Sign and upload a release; credentials come only from environment variables |
+
+Releasing: [`docs/release/RELEASE.md`](docs/release/RELEASE.md) (signing key, Marketplace upload, every later release)
+and [`docs/release/LAUNCH-KIT.md`](docs/release/LAUNCH-KIT.md) (trailer and Shorts scripts, social posts, schedule).
 
 ## Plugin structure
 
@@ -175,6 +179,7 @@ background.
 .
 ├── docs/overlay-investigation.md   Platform investigation and measurements
 ├── docs/media/                     Screenshots and GIFs for the README and Marketplace listing
+├── docs/release/                   Release checklist and launch kit
 ├── src/main/kotlin/info/chrzanowski/ideatmosphere/
 │   ├── core/ · render/ · frame/ · effects/ · project/ · listeners/ · events/ · actions/ · widget/
 │   ├── AtmosphereBundle.kt · AtmosphereManager.kt
@@ -183,7 +188,7 @@ background.
 ├── src/main/resources/messages/             Message bundle
 ├── src/test/kotlin/...                      Tests mirroring the main packages
 ├── build.gradle.kts · settings.gradle.kts
-└── CHANGELOG.md · README.md
+└── CHANGELOG.md · README.md · LICENSE
 ```
 
 The plugin logo is `src/main/resources/META-INF/pluginIcon.svg`; Marketplace screenshots come from `docs/media`.

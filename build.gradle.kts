@@ -1,4 +1,7 @@
+import org.jetbrains.changelog.Changelog
+import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
+import org.jetbrains.intellij.platform.gradle.models.ProductRelease
 
 plugins {
     id("org.jetbrains.kotlin.jvm")
