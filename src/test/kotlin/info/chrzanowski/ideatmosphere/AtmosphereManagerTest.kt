@@ -666,6 +666,62 @@ class AtmosphereManagerTest : BasePlatformTestCase() {
         assertEquals(listOf(AtmosphereEvent.ACTIVITY_STARTED), first.effect.events)
     }
 
+    fun `test activity finishing while reactions are disabled does not leave a stale count`() {
+        attachFirst()
+        manager.beginActivity(project)
+        val state = AtmosphereSettingsState.getInstance().state
+        state.reactToActivity = false
+        manager.applySettings()
+        first.effect.events.clear()
+
+        manager.endActivity(project, success = true)
+        assertEmpty(first.effect.events)
+
+        state.reactToActivity = true
+        manager.applySettings()
+        assertEquals(listOf(AtmosphereEvent.ACTIVITY_FINISHED), first.effect.events)
+        first.effect.events.clear()
+        manager.beginActivity(project)
+        manager.endActivity(project)
+        assertEquals(listOf(AtmosphereEvent.ACTIVITY_STARTED, AtmosphereEvent.ACTIVITY_FINISHED), first.effect.events)
+    }
+
+    fun `test activities started while reactions are disabled remain reference counted`() {
+        attachFirst()
+        val state = AtmosphereSettingsState.getInstance().state
+        state.reactToActivity = false
+        manager.applySettings()
+        manager.beginActivity(project)
+        manager.beginActivity(project)
+        assertEmpty(first.effect.events)
+
+        state.reactToActivity = true
+        manager.applySettings()
+        assertEquals(listOf(AtmosphereEvent.ACTIVITY_STARTED), first.effect.events)
+        manager.endActivity(project)
+        assertEquals(listOf(AtmosphereEvent.ACTIVITY_STARTED), first.effect.events)
+        manager.endActivity(project)
+        assertEquals(listOf(AtmosphereEvent.ACTIVITY_STARTED, AtmosphereEvent.ACTIVITY_FINISHED), first.effect.events)
+    }
+
+    fun `test re-enabling reactions restores debugger suspension rather than the busy state`() {
+        attachFirst()
+        manager.beginActivity(project)
+        val session = Any()
+        manager.setExecutionPaused(project, session, true)
+        val state = AtmosphereSettingsState.getInstance().state
+        state.reactToActivity = false
+        manager.applySettings()
+        manager.endActivity(project)
+        first.effect.events.clear()
+
+        state.reactToActivity = true
+        manager.applySettings()
+        assertEquals(listOf(AtmosphereEvent.EXECUTION_PAUSED), first.effect.events)
+        manager.setExecutionPaused(project, session, false)
+        assertEquals(listOf(AtmosphereEvent.EXECUTION_PAUSED, AtmosphereEvent.ACTIVITY_FINISHED), first.effect.events)
+    }
+
     fun `test detach clears activity count`() {
         attachFirst()
         manager.beginActivity(project)

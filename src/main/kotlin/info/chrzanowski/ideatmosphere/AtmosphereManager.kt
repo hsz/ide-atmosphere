@@ -86,6 +86,7 @@ class AtmosphereManager(
     /** Suspended executions (debug sessions) per project; the field holds still while any is paused. */
     private val pausedExecutions = HashMap<Project, MutableSet<Any>>()
     private val pauseReasons: EnumSet<PauseReason> = EnumSet.noneOf(PauseReason::class.java)
+    private var appliedReactToActivity = AtmosphereSettingsState.getInstance().state.reactToActivity
     private var disposed = false
     private var idleJob: Job? = null
     private var snoozeJob: Job? = null
@@ -272,16 +273,14 @@ class AtmosphereManager(
     /**
      * Increments the activity counter for [project]. If this is the first activity (0→1), publishes
      * [AtmosphereEvent.ACTIVITY_STARTED]. Generic and reference-counted so overlapping tasks
-     * (e.g. build + run) don't flicker the start/finish state. Respects `reactToActivity` setting.
+     * (e.g. build + run) don't flicker the start/finish state. Only event delivery respects `reactToActivity`.
      */
     @RequiresEdt
     fun beginActivity(project: Project) {
         if (disposed) return
-        val state = AtmosphereSettingsState.getInstance().state
-        if (!state.reactToActivity) return
-
         val count = activityCounts.getOrDefault(project, 0) + 1
         activityCounts[project] = count
+        if (!AtmosphereSettingsState.getInstance().state.reactToActivity) return
         // While execution is suspended the field stays still; resuming re-publishes the busy state.
         if (count == 1 && !isExecutionPaused(project)) {
             publish(AtmosphereEvent.ACTIVITY_STARTED, project)
@@ -318,7 +317,7 @@ class AtmosphereManager(
     /**
      * Decrements the activity counter for [project]. If this reaches zero (1→0), publishes
      * [AtmosphereEvent.ACTIVITY_FINISHED]. Always publishes [AtmosphereEvent.SUCCESS] or
-     * [AtmosphereEvent.FAILURE] regardless of counter transition. Respects `reactToActivity` setting.
+     * [AtmosphereEvent.FAILURE] regardless of counter transition. Only event delivery respects `reactToActivity`.
      */
     @RequiresEdt
     fun endActivity(project: Project, success: Boolean) {
@@ -354,9 +353,6 @@ class AtmosphereManager(
 
     private fun finishActivity(project: Project, outcome: AtmosphereEvent?) {
         if (disposed) return
-        val state = AtmosphereSettingsState.getInstance().state
-        if (!state.reactToActivity) return
-
         val oldCount = activityCounts.getOrDefault(project, 0)
         val newCount = (oldCount - 1).coerceAtLeast(0)
         if (newCount == 0) {
@@ -364,6 +360,7 @@ class AtmosphereManager(
         } else {
             activityCounts[project] = newCount
         }
+        if (!AtmosphereSettingsState.getInstance().state.reactToActivity) return
 
         if (oldCount == 1 && newCount == 0 && !isExecutionPaused(project)) {
             publish(AtmosphereEvent.ACTIVITY_FINISHED, project)
@@ -465,6 +462,18 @@ class AtmosphereManager(
         updateBackgroundProducer()
         updateTypingProducer()
         updateCaretProducers()
+
+        if (state.reactToActivity && !appliedReactToActivity) {
+            for (registration in registrations.values) {
+                val event = when {
+                    isExecutionPaused(registration.project) -> AtmosphereEvent.EXECUTION_PAUSED
+                    activityCounts.getOrDefault(registration.project, 0) > 0 -> AtmosphereEvent.ACTIVITY_STARTED
+                    else -> AtmosphereEvent.ACTIVITY_FINISHED
+                }
+                registration.atmosphere?.publish(event)
+            }
+        }
+        appliedReactToActivity = state.reactToActivity
 
         // 4. Pause on focus loss
         if (!state.pauseOnFocusLoss) {
