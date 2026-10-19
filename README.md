@@ -8,6 +8,8 @@ IDE Atmosphere adds subtle animated effects to IntelliJ-based IDEs. Choose **Fir
 **Rain**, **Starfield**, **Autumn Leaves**, **Bubbles** or **Dust Motes**. Effects appear across your project window
 without blocking input or changing your code.
 
+![IDE Atmosphere animated demo](.github/README/atmosphere-horizontal.gif)
+
 > **Free and sponsor-supported.** If you enjoy IDE Atmosphere, consider supporting its development via
 > **[GitHub Sponsors](https://github.com/sponsors/hsz)**, **[Ko-fi](https://ko-fi.com/hszanowski)**, or **[PayPal](https://paypal.me/hsz)**.
 > You can also find my other projects on [GitHub](https://github.com/hsz).
