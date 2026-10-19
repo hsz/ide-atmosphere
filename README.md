@@ -4,12 +4,9 @@
 
 ## Overview
 
-IDE Atmosphere is an IntelliJ Platform plugin that paints a quiet, living layer across the whole project frame (editor,
-tool windows, header and status bar): **Fireflies** on a summer night, **Sakura** petals in a spring breeze, softly
-falling **Snow**, fine **Rain**, a twinkling **Starfield**, swinging **Autumn Leaves**, rising **Bubbles** or
-**Dust Motes** floating in a beam of light. It never intercepts input and never changes editor content, PSI or
-languages. The overlay is a `Painter` on the frame's existing `IdeGlassPaneImpl`; see
-[docs/overlay-investigation.md](./docs/overlay-investigation.md) for the platform investigation behind that choice.
+IDE Atmosphere adds subtle animated effects to IntelliJ-based IDEs. Choose **Fireflies**, **Sakura**, **Snow**,
+**Rain**, **Starfield**, **Autumn Leaves**, **Bubbles** or **Dust Motes**. Effects appear across your project window
+without blocking input or changing your code.
 
 > **Free and sponsor-supported.** If you enjoy IDE Atmosphere, consider supporting its development via
 > **[GitHub Sponsors](https://github.com/sponsors/hsz)**, **[Ko-fi](https://ko-fi.com/hszanowski)**, or **[PayPal](https://paypal.me/hsz)**.
@@ -26,77 +23,37 @@ the Development table below shows how to regenerate them.
 
 ## What it does
 
-- **Eight atmospheres on every project window.** Wandering, breathing fireflies; drifting, tumbling Sakura petals;
-  layered snowflakes with depth (near ones larger, brighter and faster); rain streaking down in depth layers and
-  splashing where the near drops land; a slowly drifting, twinkling starfield with a rare shooting star; warm autumn
-  leaves swinging down like a pendulum; thin bubbles wobbling upwards; or tiny dust motes hanging almost still and
-  shimmering in the light. Each
-  covers the whole `IdeFrame` — editor, tool windows, empty editor area, toolbar/header band and status bar. The count
-  scales with the window area and the field is rebuilt on resize.
-- **Never in the way.** The overlay is a `Painter` on the frame's existing `IdeGlassPaneImpl`: passive cursor
-  observation never consumes mouse events, enables an input target or changes the cursor. Popups, completion, Search Everywhere,
-  dialogs and floating tool windows are separate windows, so particles always stay behind them.
-- **Theme aware.** Palette derived from the current LaF (`JBColor.isBright()` + panel background luminance) and
-  refreshed on theme change: every atmosphere has a dark and a light variant (warm amber / deep amber fireflies,
-  soft pink petals, white / blue-grey snow, cold white / slate-blue stars). Optionally a different atmosphere for
-  light and for dark themes.
-- **Smooth.** Fireflies are rendered at sub-pixel positions (float geometry, antialiasing, `STROKE_PURE`) at a
-  governed 20–30 FPS with real `deltaTime`, so they glide instead of hopping between pixels.
-- **Plays with the pointer — without ever touching input.** In *Avoid* mode particles within 180 px of the pointer
-  accelerate smoothly away from it (up to 120 px/s right under the cursor) and glide back into their own motion once
-  it has moved on; in *Attract* mode they gather around the pointer and hover just outside a small stop radius; *Off*
-  ignores it. A mouse click puffs nearby particles outward. Everything is observed through a passive
-  `AWTEventListener`, so clicks and movement reach the IDE unchanged; this is independent of activity reactions.
-- **Reacts to the IDE — with motion, never with colour.** When the debugger stops on a breakpoint (or after a step)
-  the field holds still almost completely, as if holding its breath, until the session resumes. Any background task
-  shown in the status bar for more than about a second, indexing, project builds, Run/Debug processes and external
-  project sync/tasks (including Gradle) speed the particles up while they run. A success makes the whole field rise
-  for a moment (fireflies lift and brighten, petals and snow ride an updraft, rain eases, a shooting star crosses the
-  sky); a failure scatters the fireflies, sends one gust through the petals, flakes and drops or makes the sky shiver
-  while everything dims briefly. Test runs report their own outcome from the result tree (all passed / any failed). Cancelled
-  external tasks, aborted builds and stopped test runs finish neutrally, and a Gradle run is reported exactly once.
-  After 30 s without input (`IdleTracker`) particles slow down and animation drops to 15 FPS; input restores normal
-  motion.
-- **Follows your typing.** Keystrokes feed a smoothed rhythm: fast typing stirs the particles up to 1.5× their speed
-  and a pause lets them settle again within a few seconds. Keys are only observed, never consumed.
-- **Cheap when unattended.** One small repaint rectangle per moved firefly, all painted in a single back-buffer
-  flush (never a whole-window repaint during animation); an adaptive governor keeps the tick cost under ≈ 10 % of
-  one core by lowering the rate to 20 FPS first. When the IDE application is deactivated the atmosphere fades out
-  over 0.5 s and the animation timer stops (0 % CPU) until activation fades it back in; fully frozen while the frame
-  is hidden or iconified, Power Save mode is on or the atmosphere is snoozed from the status bar.
-- **Reduce Motion.** One switch makes every atmosphere very slow and low-frame-rate, with no success bursts, failure
-  gusts, click puffs or typing boosts — the picture stays alive without ever moving quickly.
+- **Covers the project window.** Effects appear over the editor, tool windows, header and status bar, and adapt to
+  the window size.
+- **Stays out of the way.** Typing, clicks and mouse movement work as usual. Popups and dialogs stay above the effects.
+- **Matches your theme.** Every atmosphere has light and dark variants. You can also choose a different atmosphere
+  for each theme.
+- **Reacts to IDE activity.** Optional reactions reflect builds, tests, background tasks and debugger pauses.
+- **Responds to you.** Particles can follow your typing rhythm, avoid or gather around the pointer, and scatter on clicks.
+- **Slows down when idle.** Animation pauses when the window is hidden, Power Save mode is on or you snooze it.
+- **Offers reduced motion.** Gentler animation without bursts, gusts, click effects or typing boosts.
 
 ### Toggle and status bar
 
-`View | Appearance | Atmosphere` shows or hides the effect on all windows. The choice is persisted across restarts
-(`PropertiesComponent`, key `ide.atmosphere.enabled`, default on).
+Use `View | Appearance | Atmosphere` to show or hide effects on all project windows. Effects are on by default,
+and your choice is saved across restarts.
 
-The **Atmosphere** status bar widget shows the current atmosphere (or *paused*) and opens a popup to switch to any
-other one, **Pause for 1 Hour** (resumable at any time; the snooze is not persisted), open the settings page or
-**♥ Sponsor IDE Atmosphere**.
+The **Atmosphere** status bar menu lets you switch effects, **Pause for 1 Hour**, resume, open settings or support
+the project. The pause ends when you restart the IDE.
 
 ### Settings
 
-`Settings | Appearance & Behavior | Atmosphere` is deliberately small:
+Open `Settings | Appearance & Behavior | Atmosphere` to customize:
 
-- **Atmosphere** — Fireflies, Sakura, Snow, Rain, Starfield, Autumn Leaves, Bubbles or Dust Motes, with a one-line
-  description of the selected one and a **live preview** that runs it with the drafted intensity and speed before
-  Apply (it animates only while the page is shown and never touches the open windows).
-- **Intensity** (Subtle … Vivid) and **Speed** (Calm … Lively) sliders. Intensity changes opacity and population on
-  the next animation tick without a resize; speed scales normal, idle and busy motion alike.
-- **React to IDE activity**, with **Preview success** / **Preview failure** buttons that play the reactions on the
-  open windows right away (they work even while automatic reactions are off and never save anything), and **React
-  to typing** for the keystroke rhythm.
-- **Mouse pointer** — *Particles avoid the pointer*, *Particles gather around the pointer* or *Ignore the pointer*
-  (clicks puff particles in the first two modes).
+- **Atmosphere**, with a live preview before applying changes.
+- **Intensity** (Subtle … Vivid) and **Speed** (Calm … Lively).
+- **React to IDE activity** and **React to typing**. Use **Preview success** and **Preview failure** to try reactions
+  on your open windows.
+- **Mouse pointer** — avoid it, gather around it or ignore it.
 - **Pause when the IDE window is in the background** and **Reduce motion**.
-- **Light and dark themes** — an optional separate atmosphere for light and for dark themes (*Same as above* by
-  default).
+- **Light and dark themes** — optionally choose a separate atmosphere for each.
 
-Reaction timings are built into each atmosphere and tuned to feel natural; there is nothing to configure there.
-Changes stay drafts until Apply, Reset reloads the saved values and Cancel discards them. Everything is persisted in
-`ideatmosphere.xml`; the 1.x `avoidMouse` flag is migrated to the pointer mode (`false` → *Ignore the pointer*).
+Select **Apply** to save changes, **Reset** to reload saved settings or **Cancel** to discard edits.
 
 ### Debug statistics
 
