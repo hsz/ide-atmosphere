@@ -5,6 +5,7 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.util.xmlb.XmlSerializer
 import info.chrzanowski.ideatmosphere.core.PointerMode
 import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
+import info.chrzanowski.ideatmosphere.effects.autumn.AutumnLeavesEffect
 
 class AtmosphereSettingsStateTest : BasePlatformTestCase() {
 
@@ -25,6 +26,7 @@ class AtmosphereSettingsStateTest : BasePlatformTestCase() {
     fun `test defaults`() {
         val state = AtmosphereSettingsState().state
 
+        assertEquals(AutumnLeavesEffect.ID, AtmosphereEffects.DEFAULT_ID)
         assertEquals(AtmosphereEffects.DEFAULT_ID, state.effectId)
         assertEquals(1f, state.intensity)
         assertEquals(1f, state.speed)
@@ -38,6 +40,15 @@ class AtmosphereSettingsStateTest : BasePlatformTestCase() {
         assertFalse(state.caretAnchor)
         assertEquals(AtmosphereSettingsState.State(), state)
         assertEquals(state, state.normalized())
+    }
+
+    fun `test missing and unknown effect ids create fresh autumn leaves`() {
+        val missing = AtmosphereEffects.createOrDefault(null)
+        val unknown = AtmosphereEffects.createOrDefault("unknown")
+
+        assertTrue(missing is AutumnLeavesEffect)
+        assertTrue(unknown is AutumnLeavesEffect)
+        assertNotSame(missing, unknown)
     }
 
     fun `test reduce motion, per-theme presets and the caret anchor round-trip through XML`() {

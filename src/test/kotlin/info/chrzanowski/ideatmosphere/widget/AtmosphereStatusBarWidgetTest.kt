@@ -73,8 +73,10 @@ class AtmosphereStatusBarWidgetTest : BasePlatformTestCase() {
         val effects = group().getChildren(null).filterIsInstance<ToggleAction>()
         val snow = effects.single { it.templatePresentation.text == AtmosphereBundle.message("effect.snow.name") }
         val fireflies = effects.first()
+        val autumn = effects.single { it.templatePresentation.text == AtmosphereBundle.message("effect.autumn.name") }
 
-        assertTrue(fireflies.isSelected(TestActionEvent.createTestEvent(fireflies)))
+        assertTrue(autumn.isSelected(TestActionEvent.createTestEvent(autumn)))
+        assertFalse(fireflies.isSelected(TestActionEvent.createTestEvent(fireflies)))
         assertFalse(snow.isSelected(TestActionEvent.createTestEvent(snow)))
 
         snow.setSelected(TestActionEvent.createTestEvent(snow), true)
@@ -82,6 +84,7 @@ class AtmosphereStatusBarWidgetTest : BasePlatformTestCase() {
         assertEquals("snow", AtmosphereSettingsState.getInstance().state.effectId)
         assertEquals("snow", manager.currentEffectId)
         assertTrue(snow.isSelected(TestActionEvent.createTestEvent(snow)))
+        assertFalse(autumn.isSelected(TestActionEvent.createTestEvent(autumn)))
         assertFalse(fireflies.isSelected(TestActionEvent.createTestEvent(fireflies)))
 
         // Deselecting the current entry does not switch to anything else.
@@ -131,7 +134,7 @@ class AtmosphereStatusBarWidgetTest : BasePlatformTestCase() {
         assertEquals(AtmosphereStatusBarWidgetFactory.ID, widget.ID())
         assertSame(widget, widget.getPresentation())
         assertEquals(
-            AtmosphereBundle.message("widget.text", AtmosphereBundle.message("effect.fireflies.name")),
+            AtmosphereBundle.message("widget.text", AtmosphereBundle.message("effect.${AtmosphereEffects.DEFAULT_ID}.name")),
             widget.getSelectedValue(),
         )
         assertEquals(AtmosphereBundle.message("widget.tooltip"), widget.getTooltipText())

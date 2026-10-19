@@ -425,7 +425,7 @@ class FirefliesEffectTest {
         val ids = AtmosphereEffects.ids
         assertTrue(ids.contains(FirefliesEffect.ID))
         val a = AtmosphereEffects.create(FirefliesEffect.ID)
-        val b = AtmosphereEffects.createOrDefault("unknown")
+        val b = AtmosphereEffects.createOrDefault(FirefliesEffect.ID)
         assertNotNull(a)
         assertTrue(a is FirefliesEffect && b is FirefliesEffect && a !== b)
     }

@@ -5,7 +5,6 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.impl.IdeGlassPaneImpl
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.util.ui.UIUtil
-import git4idea.push.GitPushRepoResult
 import info.chrzanowski.ideatmosphere.AtmosphereManager
 import info.chrzanowski.ideatmosphere.RecordingEffect
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
@@ -14,7 +13,7 @@ import info.chrzanowski.ideatmosphere.settings.AtmosphereSettingsState
 import javax.swing.JRootPane
 
 /**
- * The outcome-only producers (test results, commits, pushes) share one contract: exactly one SUCCESS / FAILURE per
+ * The outcome-only producers (test results) share one contract: exactly one SUCCESS / FAILURE per
  * event on the project's frame, nothing for neutral results, no activity counting, and silence while
  * `reactToActivity` is off.
  */
@@ -112,46 +111,10 @@ class OutcomeProducersTest : BasePlatformTestCase() {
         assertEquals(AtmosphereEvent.ACTIVITY_FINISHED, effect.events.last())
     }
 
-    fun `test commit success and failure reach the manager through the checkin handler`() {
-        val handler = VcsActivityProducer().createHandler(project)
-
-        handler.checkinSuccessful()
-        UIUtil.dispatchAllInvocationEvents()
-        assertEquals(listOf(AtmosphereEvent.SUCCESS), effect.events)
-
-        handler.checkinFailed(mutableListOf())
-        UIUtil.dispatchAllInvocationEvents()
-        assertEquals(listOf(AtmosphereEvent.SUCCESS, AtmosphereEvent.FAILURE), effect.events)
-    }
-
-    fun `test push results map to one outcome or none`() {
-        val producer = GitPushActivityProducer(project)
-        for (type in listOf(GitPushRepoResult.Type.SUCCESS, GitPushRepoResult.Type.NEW_BRANCH, GitPushRepoResult.Type.FORCED)) {
-            assertEquals(type.name, true, GitPushActivityProducer.outcomeOf(type))
-        }
-        for (type in listOf(
-            GitPushRepoResult.Type.REJECTED_NO_FF, GitPushRepoResult.Type.REJECTED_STALE_INFO,
-            GitPushRepoResult.Type.REJECTED_OTHER, GitPushRepoResult.Type.ERROR,
-        )) {
-            assertEquals(type.name, false, GitPushActivityProducer.outcomeOf(type))
-        }
-        for (type in listOf(GitPushRepoResult.Type.UP_TO_DATE, GitPushRepoResult.Type.NOT_PUSHED)) {
-            assertNull(type.name, GitPushActivityProducer.outcomeOf(type))
-        }
-
-        producer.onCompleted(GitPushActivityProducer.outcomeOf(GitPushRepoResult.Type.UP_TO_DATE))
-        producer.onCompleted(GitPushActivityProducer.outcomeOf(GitPushRepoResult.Type.SUCCESS))
-        producer.onCompleted(GitPushActivityProducer.outcomeOf(GitPushRepoResult.Type.REJECTED_NO_FF))
-        UIUtil.dispatchAllInvocationEvents()
-        assertEquals(listOf(AtmosphereEvent.SUCCESS, AtmosphereEvent.FAILURE), effect.events)
-    }
-
     fun `test disabled activity reactions silence every outcome producer`() {
         AtmosphereSettingsState.getInstance().state.reactToActivity = false
 
         TestResultActivityProducer(project).onFinished(success = true)
-        VcsActivityProducer().createHandler(project).checkinSuccessful()
-        GitPushActivityProducer(project).onCompleted(success = false)
         UIUtil.dispatchAllInvocationEvents()
 
         assertEmpty(effect.events)
@@ -161,7 +124,6 @@ class OutcomeProducersTest : BasePlatformTestCase() {
         AtmosphereManager.getInstance().detach(project)
 
         TestResultActivityProducer(project).onFinished(success = true)
-        VcsActivityProducer().createHandler(project).checkinSuccessful()
         UIUtil.dispatchAllInvocationEvents()
 
         assertEmpty(effect.events)

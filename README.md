@@ -47,8 +47,7 @@ the Development table below shows how to regenerate them.
   project sync/tasks (including Gradle) speed the particles up while they run. A success makes the whole field rise
   for a moment (fireflies lift and brighten, petals and snow ride an updraft, rain eases, a shooting star crosses the
   sky); a failure scatters the fireflies, sends one gust through the petals, flakes and drops or makes the sky shiver
-  while everything dims briefly. Test runs report their own outcome from the result tree (all passed / any failed),
-  and a successful commit or push celebrates too, while a failed commit or a rejected push shivers. Cancelled
+  while everything dims briefly. Test runs report their own outcome from the result tree (all passed / any failed). Cancelled
   external tasks, aborted builds and stopped test runs finish neutrally, and a Gradle run is reported exactly once.
   After 30 s without input (`IdleTracker`) particles slow down and animation drops to 15 FPS; input restores normal
   motion.
@@ -129,15 +128,14 @@ Status bar widget ──switch/snooze──▶   │
 | `frame` | `FrameAtmosphere` — one effect on one root pane, nested batch repaint routing, passive pointer / click observation, fade-out/fade-in and dormancy |
 | `effects` | `AtmosphereEffects` registry, `fireflies/FirefliesEffect`, `sakura/SakuraEffect`, `snow/SnowEffect`, `rain/RainEffect`, `starfield/StarfieldEffect`, and `autumn/AutumnLeavesEffect`, `bubbles/BubblesEffect`, `dust/DustEffect` on the shared `common/DriftingParticleEffect` base (structure-of-arrays, allocation-free hot path) |
 | `settings` | Persisted state, the settings page and its `AtmospherePreviewPanel` |
-| `project`, `listeners`, `events`, `actions`, `widget` | Lifecycle wiring, platform listeners, idle, typing, build, execution, debugger, background-task, indexing, external-system, test-result, commit and push producers, `ToggleAtmosphereAction`, the status bar widget |
+| `project`, `listeners`, `events`, `actions`, `widget` | Lifecycle wiring, platform listeners, idle, typing, build, execution, debugger, background-task, indexing, external-system, test-result producers, `ToggleAtmosphereAction`, the status bar widget |
 
 Adding another atmosphere means implementing `AtmosphereEffect` (or, for independent drifting particles, extending
 `DriftingParticleEffect` with spawn, drift and paint hooks) and registering it in `AtmosphereEffects`; adding an
 IDE integration means publishing `AtmosphereEvent`s through `AtmosphereManager.publish` (or `publishOutcome` for a
-plain success / failure). Neither touches the painter, the ticker or the lifecycle code. The commit, push and debugger
-producers live behind optional `com.intellij.modules.vcs` / `Git4Idea` / `com.intellij.modules.xdebugger`
-descriptors (`META-INF/ideatmosphere-vcs.xml`, `META-INF/ideatmosphere-git.xml`,
-`META-INF/ideatmosphere-xdebugger.xml`), so IDEs without them still load the plugin. Background tasks are sampled
+plain success / failure). Neither touches the painter, the ticker or the lifecycle code. The debugger
+producer lives behind the optional `com.intellij.modules.xdebugger`
+descriptor (`META-INF/ideatmosphere-xdebugger.xml`), so IDEs without it still load the plugin. Background tasks are sampled
 from the project's status bar once a second (`BackgroundTaskActivityProducer`), because the platform's task-start
 listener is internal API; sampling stops with *React to IDE activity* off and skips ticks while the IDE is in the
 background.
@@ -147,7 +145,7 @@ background.
 - No atmosphere on floating tool windows, detached editor windows, the Welcome screen, dialogs or popups.
 - Activity integration does not observe terminal commands, and background tasks that are not shown in the status bar
   (or finish within about a second) are not noticed. External-system notifications cover Gradle sync/tasks;
-  Maven-specific sync is not verified. Push reactions cover Git only.
+  Maven-specific sync is not verified.
 - A test run whose process exit code agrees with its result tree reacts twice in quick succession (once from the
   runner, once from the process), which reads as a slightly longer reaction.
 - While the overlay is visible, ordinary IDE repaints pay a ≈ 5–10 % overhead (the same as IDE background images).
@@ -184,7 +182,7 @@ and [`docs/release/LAUNCH-KIT.md`](docs/release/LAUNCH-KIT.md) (trailer and Shor
 │   ├── core/ · render/ · frame/ · effects/ · project/ · listeners/ · events/ · actions/ · widget/
 │   ├── AtmosphereBundle.kt · AtmosphereManager.kt
 ├── src/main/resources/META-INF/plugin.xml   Plugin manifest (activity, listeners, action, status bar widget)
-├── src/main/resources/META-INF/ideatmosphere-vcs.xml · ideatmosphere-git.xml · ideatmosphere-xdebugger.xml   Optional VCS / Git / debugger descriptors
+├── src/main/resources/META-INF/ideatmosphere-xdebugger.xml   Optional debugger descriptor
 ├── src/main/resources/messages/             Message bundle
 ├── src/test/kotlin/...                      Tests mirroring the main packages
 ├── build.gradle.kts · settings.gradle.kts

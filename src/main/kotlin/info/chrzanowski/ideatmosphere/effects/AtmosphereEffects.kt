@@ -17,7 +17,7 @@ import info.chrzanowski.ideatmosphere.effects.starfield.StarfieldEffect
 object AtmosphereEffects {
 
     /** Effect used when no explicit id is configured. */
-    const val DEFAULT_ID: String = FirefliesEffect.ID
+    const val DEFAULT_ID: String = AutumnLeavesEffect.ID
 
     private val factories: Map<String, () -> AtmosphereEffect> = linkedMapOf(
         FirefliesEffect.ID to { FirefliesEffect() },

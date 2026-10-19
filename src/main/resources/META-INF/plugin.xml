@@ -23,7 +23,7 @@
         background. Particles avoid or gather around your mouse pointer and puff away from a click, stir with your
         typing rhythm, speed up while the IDE is busy (builds, indexing, runs, Gradle sync, background tasks), hold
         their breath while the debugger is stopped on a breakpoint, rise for a moment when something succeeds &mdash;
-        a passing test run, a commit, a push &mdash; and shiver when something fails.<br><br>
+        a passing test run &mdash; and shiver when something fails.<br><br>
         Pick an atmosphere with a live preview and set intensity, speed, pointer mode and Reduce Motion under
         <b>Settings | Appearance &amp; Behavior | Atmosphere</b>; switch or pause it for an hour from the status bar
         widget, or toggle it via <b>View | Appearance | Atmosphere</b>.
@@ -32,9 +32,6 @@
     <!-- Product and plugin compatibility requirements.
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html -->
     <depends>com.intellij.modules.platform</depends>
-    <!-- Commit and push reactions load only where version control (and Git) are present. -->
-    <depends optional="true" config-file="ideatmosphere-vcs.xml">com.intellij.modules.vcs</depends>
-    <depends optional="true" config-file="ideatmosphere-git.xml">Git4Idea</depends>
     <!-- Breakpoint reactions load only where the debugger is present. -->
     <depends optional="true" config-file="ideatmosphere-xdebugger.xml">com.intellij.modules.xdebugger</depends>
 

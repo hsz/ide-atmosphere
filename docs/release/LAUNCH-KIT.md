@@ -137,7 +137,7 @@ Check each sub's self-promotion rules first. Post as a GIF or video with a short
 ### JetBrains Platform Slack / forum `#showcase`, Kotlin Slack
 
 > 👋 Just released **IDE Atmosphere**: ambient particle atmospheres painted on `IdeGlassPane` via `addPainter`, with
-> dirty-region repainting and an adaptive FPS governor. Reactions come from execution / external-system / test / VCS /
+> dirty-region repainting and an adaptive FPS governor. Reactions come from execution / external-system / test-runner /
 > debugger listeners. Notes on what worked and what didn't (nested `paintImmediately` batching, cost model):
 > `<BLOG_URL>`. Marketplace: `<MARKETPLACE_URL>`. Feedback very welcome!
 

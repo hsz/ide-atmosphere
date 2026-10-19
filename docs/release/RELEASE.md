@@ -100,9 +100,7 @@ unzip -l build/distributions/ide-atmosphere-1.0.0-signed.zip
       `ide-atmosphere/lib/ide-atmosphere-1.0.0-searchableOptions.jar`.
 
 **EAP check (by hand).** The verifier skips EAP builds on purpose. Before each release, install the signed ZIP in the
-current EAP too. Known open item: in the 2026.3 EAP (263) the commit reaction's `CheckinHandlerFactory` moved to the new
-bundled *Version Control* plugin (`com.intellij.platform.vcs`). The plugin still loads, but the commit reaction may not.
-Fix this in a 1.0.x release before 2026.3 ships.
+current EAP too.
 
 ### 2.2 Smoke test
 
@@ -167,8 +165,7 @@ The sources are private, so create a **public, issues-only** repository:
     dirty-region repainting and an FPS budget. See `docs/overlay-investigation.md`.
   - *"Why do you poll the status bar?"* The platform's task-start listener is internal API. The plugin samples the public
     status-bar progress once a second, only while *React to IDE activity* is on and the IDE is in the foreground.
-  - Deprecated `StatusBarWidget` presentation API and the experimental `GitPushListener` are reported by the verifier as
-    warnings, not problems.
+  - Deprecated `StatusBarWidget` presentation API is reported by the verifier as a warning, not a problem.
 
 ## 3. After approval
 
