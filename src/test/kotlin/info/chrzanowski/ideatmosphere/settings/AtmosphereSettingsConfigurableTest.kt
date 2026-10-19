@@ -2,6 +2,7 @@ package info.chrzanowski.ideatmosphere.settings
 
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.ui.SimpleColoredComponent
+import com.intellij.ui.components.BrowserLink
 import info.chrzanowski.ideatmosphere.AtmosphereBundle
 import info.chrzanowski.ideatmosphere.RecordingEffect
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
@@ -73,6 +74,28 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
     fun `test plugin-facing constructor exposes the display name`() {
         assertEquals(AtmosphereBundle.message("settings.displayName"), AtmosphereSettingsConfigurable().displayName)
         assertEquals(AtmosphereBundle.message("settings.displayName"), configurable.displayName)
+    }
+
+    fun `test settings offer all donation providers without modifying the draft`() {
+        val labels = descendants(component).filterIsInstance<JLabel>().map { it.text }.toList()
+        assertTrue(AtmosphereBundle.message("settings.support") in labels)
+        val providers = listOf(
+            Triple("supportGithub", "support.github", "https://github.com/sponsors/hsz"),
+            Triple("supportKofi", "support.kofi", "https://ko-fi.com/hszanowski"),
+            Triple("supportPaypal", "support.paypal", "https://paypal.me/hsz"),
+        )
+        for ((name, key, url) in providers) {
+            assertEquals(AtmosphereBundle.message(key), control<BrowserLink>(name).text)
+            assertEquals(url, control<BrowserLink>(name).url)
+            assertTrue(control<BrowserLink>(name).isEnabled)
+        }
+        enabled = false
+        configurable.reset()
+        for ((name) in providers) {
+            assertTrue(control<BrowserLink>(name).isEnabled)
+        }
+        assertFalse(configurable.isModified())
+        assertEquals(0, applyCalls)
     }
 
     fun `test controls appear in the promised order without spinners`() {

@@ -11,13 +11,14 @@ import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import info.chrzanowski.ideatmosphere.AtmosphereBundle
 import info.chrzanowski.ideatmosphere.AtmosphereManager
+import info.chrzanowski.ideatmosphere.actions.SponsorAtmosphereAction
 import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
 import info.chrzanowski.ideatmosphere.settings.AtmosphereSettingsConfigurable
 
 /**
  * The actions behind the status bar widget's popup: one radio-like entry per selectable effect,
- * "Pause for 1 Hour" (or "Resume" while snoozed) and "Open Atmosphere Settings…". Everything
- * delegates to [AtmosphereManager].
+ * "Pause for 1 Hour" (or "Resume" while snoozed), "Open Atmosphere Settings…" and sponsorship.
+ * Atmosphere controls delegate to [AtmosphereManager].
  */
 object AtmosphereWidgetActions {
 
@@ -32,6 +33,8 @@ object AtmosphereWidgetActions {
         group.add(Separator.getInstance())
         group.add(SnoozeAction(manager))
         group.add(OpenSettingsAction(openSettings))
+        group.add(Separator.getInstance())
+        group.add(SponsorAtmosphereAction())
         return group
     }
 

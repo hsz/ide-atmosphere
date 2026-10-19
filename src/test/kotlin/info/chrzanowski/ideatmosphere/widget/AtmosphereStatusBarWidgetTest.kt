@@ -11,6 +11,7 @@ import com.intellij.testFramework.TestActionEvent
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import info.chrzanowski.ideatmosphere.AtmosphereBundle
 import info.chrzanowski.ideatmosphere.AtmosphereManager
+import info.chrzanowski.ideatmosphere.actions.SponsorAtmosphereAction
 import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
 import info.chrzanowski.ideatmosphere.settings.AtmosphereSettingsState
 
@@ -65,8 +66,11 @@ class AtmosphereStatusBarWidgetTest : BasePlatformTestCase() {
         assertTrue(effects.all { it is ToggleAction })
         assertTrue(children[ids.size] is Separator)
         assertEquals(AtmosphereBundle.message("widget.popup.snooze"), update(children[ids.size + 1]).presentation.text)
-        assertEquals(AtmosphereBundle.message("widget.popup.settings"), children.last().templatePresentation.text)
-        assertEquals(ids.size + 3, children.size)
+        assertEquals(AtmosphereBundle.message("widget.popup.settings"), children[ids.size + 2].templatePresentation.text)
+        assertTrue(children[ids.size + 3] is Separator)
+        assertTrue(children.last() is SponsorAtmosphereAction)
+        assertEquals(AtmosphereBundle.message("action.info.chrzanowski.ideatmosphere.SponsorAtmosphereAction.text"), children.last().templatePresentation.text)
+        assertEquals(ids.size + 5, children.size)
     }
 
     fun `test selecting an effect switches it and marks it selected`() {
@@ -121,7 +125,7 @@ class AtmosphereStatusBarWidgetTest : BasePlatformTestCase() {
     }
 
     fun `test settings entry opens the settings`() {
-        val settings = group().getChildren(null).last()
+        val settings = group().getChildren(null).filterIsInstance<AtmosphereWidgetActions.OpenSettingsAction>().single()
 
         settings.actionPerformed(TestActionEvent.createTestEvent(settings))
 

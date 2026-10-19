@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+### Added
+
+- Optional support via GitHub Sponsors, Ko-fi and PayPal in the settings page, README and Marketplace description, plus a **♥ Sponsor IDE Atmosphere** action in the status-bar menu and Find Action.
+- A local-only sponsorship reminder after 10 enabled project openings and 14 days of use, with a 90-day snooze and permanent opt-out.
+- GitHub funding metadata and a sponsorship notice in Marketplace release notes.
+
 ## 1.0.0 - 2026-10-02
 
 First public release.

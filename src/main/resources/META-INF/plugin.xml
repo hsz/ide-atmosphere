@@ -26,7 +26,11 @@
         a passing test run &mdash; and shiver when something fails.<br><br>
         Pick an atmosphere with a live preview and set intensity, speed, pointer mode and Reduce Motion under
         <b>Settings | Appearance &amp; Behavior | Atmosphere</b>; switch or pause it for an hour from the status bar
-        widget, or toggle it via <b>View | Appearance | Atmosphere</b>.
+        widget, or toggle it via <b>View | Appearance | Atmosphere</b>.<br><br>
+        <b>Free and sponsor-supported.</b> If you enjoy IDE Atmosphere, consider supporting its development via
+        <a href="https://github.com/sponsors/hsz">GitHub Sponsors</a>,
+        <a href="https://ko-fi.com/hszanowski">Ko-fi</a>, or <a href="https://paypal.me/hsz">PayPal</a>.
+        You can also find my other projects on <a href="https://github.com/hsz">GitHub</a>.
         ]]></description>
 
     <!-- Product and plugin compatibility requirements.
@@ -42,6 +46,9 @@
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
         <postStartupActivity implementation="info.chrzanowski.ideatmosphere.project.AtmosphereProjectActivity"/>
+        <postStartupActivity implementation="info.chrzanowski.ideatmosphere.support.SponsorNotificationActivity"/>
+        <notificationGroup id="IDE Atmosphere" displayType="STICKY_BALLOON"
+                           bundle="messages.AtmosphereBundle" key="sponsor.notification.group"/>
 
         <applicationConfigurable
                 groupId="appearance"
@@ -85,6 +92,8 @@
                 class="info.chrzanowski.ideatmosphere.actions.ToggleAtmosphereAction">
             <add-to-group group-id="UIToggleActions" anchor="last"/>
         </action>
+        <action id="info.chrzanowski.ideatmosphere.SponsorAtmosphereAction"
+                class="info.chrzanowski.ideatmosphere.actions.SponsorAtmosphereAction"/>
     </actions>
 
 </idea-plugin>

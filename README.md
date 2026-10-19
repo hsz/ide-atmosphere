@@ -1,5 +1,7 @@
 # IDE Atmosphere
 
+[![Sponsor](https://img.shields.io/github/sponsors/hsz?style=flat&logo=githubsponsors&label=Sponsor)](https://github.com/sponsors/hsz)
+
 ## Overview
 
 IDE Atmosphere is an IntelliJ Platform plugin that paints a quiet, living layer across the whole project frame (editor,
@@ -8,6 +10,10 @@ falling **Snow**, fine **Rain**, a twinkling **Starfield**, swinging **Autumn Le
 **Dust Motes** floating in a beam of light. It never intercepts input and never changes editor content, PSI or
 languages. The overlay is a `Painter` on the frame's existing `IdeGlassPaneImpl`; see
 [docs/overlay-investigation.md](./docs/overlay-investigation.md) for the platform investigation behind that choice.
+
+> **Free and sponsor-supported.** If you enjoy IDE Atmosphere, consider supporting its development via
+> **[GitHub Sponsors](https://github.com/sponsors/hsz)**, **[Ko-fi](https://ko-fi.com/hszanowski)**, or **[PayPal](https://paypal.me/hsz)**.
+> You can also find my other projects on [GitHub](https://github.com/hsz).
 
 | Fireflies | Sakura | Snow | Rain |
 |---|---|---|---|
@@ -67,7 +73,8 @@ the Development table below shows how to regenerate them.
 (`PropertiesComponent`, key `ide.atmosphere.enabled`, default on).
 
 The **Atmosphere** status bar widget shows the current atmosphere (or *paused*) and opens a popup to switch to any
-other one, **Pause for 1 Hour** (resumable at any time; the snooze is not persisted) or open the settings page.
+other one, **Pause for 1 Hour** (resumable at any time; the snooze is not persisted), open the settings page or
+**♥ Sponsor IDE Atmosphere**.
 
 ### Settings
 
@@ -156,6 +163,20 @@ background.
 - The single-flush saving of the nested batch repaint needs Swing's `BufferStrategyPaintManager`
   (`swing.bufferPerWindow=true`; verified on macOS/Metal). On other pipelines every rectangle pays its own blit and
   the governor settles at 20 FPS.
+
+## Support development
+
+Donation links are also available in **Settings → Appearance & Behavior → Atmosphere**. The Atmosphere status-bar
+menu includes **♥ Sponsor IDE Atmosphere**, which opens GitHub Sponsors; the same action is available in Find Action.
+Donations are optional; all plugin features remain free.
+
+A sponsorship reminder can appear only after at least **10 project openings with Atmosphere enabled** and
+**14 days since first use**. Disabled Atmosphere, default projects, headless runs and unit tests do not count.
+**Remind me later**, or closing the reminder, snoozes it for **90 days**; **Don't show again**, or selecting a donation
+provider in the reminder, stops future reminders permanently. Timing and reminder choices are stored locally in
+`ideatmosphere-sponsor.xml` and are not synchronized or sent anywhere.
+
+Marketplace release notes also include a sponsorship notice.
 
 ## Development
 

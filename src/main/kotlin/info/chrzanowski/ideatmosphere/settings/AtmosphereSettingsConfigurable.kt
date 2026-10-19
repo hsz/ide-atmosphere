@@ -10,6 +10,7 @@ import info.chrzanowski.ideatmosphere.AtmosphereManager
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
 import info.chrzanowski.ideatmosphere.core.PointerMode
 import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
+import info.chrzanowski.ideatmosphere.support.AtmosphereSupport
 import java.awt.event.ItemEvent
 import javax.swing.JCheckBox
 import javax.swing.JComponent
@@ -64,6 +65,18 @@ class AtmosphereSettingsConfigurable internal constructor(
         draft = settings.state.normalized().deepCopy()
         draftEnabled = readEnabled()
         panel = panel {
+            row {
+                label(AtmosphereBundle.message("settings.support"))
+            }
+            row {
+                browserLink(AtmosphereBundle.message("support.github"), AtmosphereSupport.GITHUB_URL)
+                    .applyToComponent { name = "supportGithub" }
+                browserLink(AtmosphereBundle.message("support.kofi"), AtmosphereSupport.KO_FI_URL)
+                    .applyToComponent { name = "supportKofi" }
+                browserLink(AtmosphereBundle.message("support.paypal"), AtmosphereSupport.PAYPAL_URL)
+                    .applyToComponent { name = "supportPaypal" }
+            }
+            separator()
             row {
                 checkBox(AtmosphereBundle.message("settings.enabled"))
                     .bindSelected(::draftEnabled)

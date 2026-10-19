@@ -1,3 +1,5 @@
+import org.jetbrains.changelog.Changelog
+import org.jetbrains.changelog.markdownToHTML
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 
 plugins {
@@ -20,6 +22,26 @@ dependencies {
     intellijPlatform {
         intellijIdea("2025.3.6.1")
         testFramework(TestFrameworkType.Platform)
+    }
+}
+
+intellijPlatform {
+    pluginConfiguration {
+        val changelog = project.changelog
+        changeNotes = providers.gradleProperty("version").map { pluginVersion ->
+            val sponsorship = markdownToHTML(
+                "_IDE Atmosphere is free and sponsor-supported. If you enjoy it, consider " +
+                    "[♥ sponsoring it on GitHub](https://github.com/sponsors/hsz)._",
+            )
+            sponsorship + with(changelog) {
+                renderItem(
+                    (getOrNull(pluginVersion) ?: getUnreleased())
+                        .withHeader(false)
+                        .withEmptySections(false),
+                    Changelog.OutputType.HTML,
+                )
+            }
+        }
     }
 }
 
