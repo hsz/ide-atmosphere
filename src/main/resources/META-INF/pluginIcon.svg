@@ -1,12 +1,32 @@
 <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M32.0845 7.94025V4H24.0203V7.9896H16.029V4H7.91553V7.94025H4V36H16.0044V32.0045C16.0058 30.9457 16.4274 29.9308 17.1766 29.1826C17.9258 28.4345 18.9412 28.0143 20 28.0143C21.0588 28.0143 22.0743 28.4345 22.8234 29.1826C23.5726 29.9308 23.9942 30.9457 23.9956 32.0045V36H36V7.94025H32.0845Z"
-          fill="url(#paint0_linear)"/>
     <defs>
-        <linearGradient id="paint0_linear" x1="2.94192" y1="4.89955" x2="37.7772" y2="39.7345"
-                        gradientUnits="userSpaceOnUse">
-            <stop offset="0.15937" stop-color="#3BEA62"/>
-            <stop offset="0.5404" stop-color="#3C99CC"/>
-            <stop offset="0.93739" stop-color="#6B57FF"/>
+        <linearGradient id="sky" x1="10" y1="4" x2="30" y2="37" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#20244F"/>
+            <stop offset="0.55" stop-color="#34316D"/>
+            <stop offset="1" stop-color="#174B64"/>
         </linearGradient>
+        <linearGradient id="aurora" x1="6" y1="29" x2="35" y2="16" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#51E6C5"/>
+            <stop offset="0.5" stop-color="#74C8F5"/>
+            <stop offset="1" stop-color="#B58AF9"/>
+        </linearGradient>
+        <linearGradient id="breeze" x1="10" y1="36" x2="34" y2="26" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#4DAACD"/>
+            <stop offset="1" stop-color="#8781E9"/>
+        </linearGradient>
+        <clipPath id="orb">
+            <circle cx="20" cy="20" r="18"/>
+        </clipPath>
     </defs>
+    <g clip-path="url(#orb)">
+        <circle cx="20" cy="20" r="18" fill="url(#sky)"/>
+        <path d="M3 27C11 30 12 17 21 18.5C27 19.5 30 18 37 10V18C31 25 26 26 20 24.5C14 23 13 35 7 34L3 27Z"
+              fill="url(#aurora)"/>
+        <path d="M10 36C17 35 17 28 24 29C30 30 34 28 38 24V30C33 35 29 35 24 34C20 33 18 39 15 40L10 36Z"
+              fill="url(#breeze)"/>
+    </g>
+    <path d="M11.5 8L12.6 11.4L16 12.5L12.6 13.6L11.5 17L10.4 13.6L7 12.5L10.4 11.4L11.5 8Z" fill="#E9F7FF"/>
+    <circle cx="25.5" cy="10.5" r="1.5" fill="#FFE3A0"/>
+    <circle cx="18.5" cy="7" r="0.75" fill="#B2B9EF"/>
+    <circle cx="29.5" cy="14.5" r="0.75" fill="#E9F7FF"/>
 </svg>
