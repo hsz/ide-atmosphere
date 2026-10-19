@@ -254,11 +254,14 @@ class AtmosphereManager(
     /**
      * Delivers [event] to every attached effect, or only to the frame of [project] when given.
      * Application-wide `USER_IDLE` / `USER_ACTIVE` additionally switch the ticker's calm (reduced-rate) mode.
+     * Idle transitions never override a project's suspended execution.
      */
     @RequiresEdt
     fun publish(event: AtmosphereEvent, project: Project? = null) {
         if (disposed) return
+        val idleTransition = event == AtmosphereEvent.USER_IDLE || event == AtmosphereEvent.USER_ACTIVE
         if (project != null) {
+            if (idleTransition && isExecutionPaused(project)) return
             registrations[project]?.atmosphere?.publish(event)
         } else {
             when (event) {
@@ -266,7 +269,10 @@ class AtmosphereManager(
                 AtmosphereEvent.USER_ACTIVE -> ticker.calm = false
                 else -> Unit
             }
-            for (registration in registrations.values) registration.atmosphere?.publish(event)
+            for (registration in registrations.values) {
+                if (idleTransition && isExecutionPaused(registration.project)) continue
+                registration.atmosphere?.publish(event)
+            }
         }
     }
 

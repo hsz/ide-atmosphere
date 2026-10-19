@@ -605,6 +605,55 @@ class AtmosphereManagerTest : BasePlatformTestCase() {
         assertFalse(manager.ticker.calm)
     }
 
+    fun `test idle broadcasts preserve debugger suspension without affecting other frames or ticker`() {
+        attachFirst()
+        val otherProject = MockProject(null, testRootDisposable)
+        try {
+            manager.attach(otherProject, second.rootPane, second.parent, second.effect)
+            val session = Any()
+            manager.beginActivity(project)
+            manager.setExecutionPaused(project, session, true)
+            first.effect.events.clear()
+
+            manager.publish(AtmosphereEvent.USER_IDLE)
+            assertTrue(manager.ticker.calm)
+            manager.publish(AtmosphereEvent.USER_ACTIVE)
+            assertFalse(manager.ticker.calm)
+            assertEmpty(first.effect.events)
+            assertEquals(listOf(AtmosphereEvent.USER_IDLE, AtmosphereEvent.USER_ACTIVE), second.effect.events)
+
+            manager.publishOutcome(project, success = true)
+            manager.setExecutionPaused(project, session, false)
+            assertEquals(listOf(AtmosphereEvent.SUCCESS, AtmosphereEvent.ACTIVITY_STARTED), first.effect.events)
+            manager.endActivity(project)
+            assertEquals(AtmosphereEvent.ACTIVITY_FINISHED, first.effect.events.last())
+        } finally {
+            manager.detach(otherProject)
+        }
+    }
+
+    fun `test targeted idle transitions cannot release suspension until the last debugger resumes`() {
+        attachFirst()
+        val firstSession = Any()
+        val secondSession = Any()
+        manager.setExecutionPaused(project, firstSession, true)
+        manager.setExecutionPaused(project, secondSession, true)
+        manager.setExecutionPaused(project, firstSession, false)
+        first.effect.events.clear()
+
+        manager.publish(AtmosphereEvent.USER_IDLE, project)
+        manager.publish(AtmosphereEvent.USER_ACTIVE, project)
+        assertEmpty(first.effect.events)
+
+        manager.setExecutionPaused(project, secondSession, false)
+        manager.publish(AtmosphereEvent.USER_IDLE, project)
+        manager.publish(AtmosphereEvent.USER_ACTIVE, project)
+        assertEquals(
+            listOf(AtmosphereEvent.ACTIVITY_FINISHED, AtmosphereEvent.USER_IDLE, AtmosphereEvent.USER_ACTIVE),
+            first.effect.events,
+        )
+    }
+
     fun `test activity reference counting avoids flickering`() {
         attachFirst()
 
