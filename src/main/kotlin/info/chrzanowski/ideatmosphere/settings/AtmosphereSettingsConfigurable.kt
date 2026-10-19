@@ -11,6 +11,7 @@ import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
 import info.chrzanowski.ideatmosphere.core.PointerMode
 import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
 import java.awt.event.ItemEvent
+import javax.swing.JCheckBox
 import javax.swing.JComponent
 import javax.swing.JEditorPane
 import javax.swing.JLabel
@@ -28,6 +29,7 @@ class AtmosphereSettingsConfigurable internal constructor(
     private val readEnabled: () -> Boolean,
     private val applySettings: (Boolean) -> Unit,
     private val previewOutcome: (AtmosphereEvent) -> Unit = { AtmosphereManager.getInstance().previewOutcome(it) },
+    private val previewFactory: () -> AtmospherePreviewPanel = { AtmospherePreviewPanel() },
 ) : Configurable {
 
     constructor() : this(
@@ -47,6 +49,7 @@ class AtmosphereSettingsConfigurable internal constructor(
     private var effectCombo: ComboBox<String>? = null
     private var intensitySlider: JSlider? = null
     private var speedSlider: JSlider? = null
+    private var reduceMotionCheckBox: JCheckBox? = null
 
     /** Live preview of the drafted atmosphere, intensity and speed; `null` before the component is created. */
     internal var preview: AtmospherePreviewPanel? = null
@@ -84,7 +87,7 @@ class AtmosphereSettingsConfigurable internal constructor(
                 effectDescription = comment("").applyToComponent { name = "effectDescription" }.component
             }
             row("") {
-                preview = cell(AtmospherePreviewPanel())
+                preview = cell(previewFactory())
                     .align(AlignX.FILL)
                     .comment(AtmosphereBundle.message("settings.preview.live.comment"))
                     .component
@@ -152,6 +155,7 @@ class AtmosphereSettingsConfigurable internal constructor(
                         .bindSelected({ currentDraft().reduceMotion }, { currentDraft().reduceMotion = it })
                         .applyToComponent { name = "reduceMotion" }
                         .comment(AtmosphereBundle.message("settings.reduceMotion.comment"))
+                        .also { reduceMotionCheckBox = it.component }
                 }
             }
             group(AtmosphereBundle.message("settings.themePresets")) {
@@ -168,6 +172,7 @@ class AtmosphereSettingsConfigurable internal constructor(
         }
         intensitySlider?.addChangeListener { updatePreview() }
         speedSlider?.addChangeListener { updatePreview() }
+        reduceMotionCheckBox?.addItemListener { updatePreview() }
         showDescription(currentDraft().effectId)
         updatePreview()
         return panel!!
@@ -214,7 +219,8 @@ class AtmosphereSettingsConfigurable internal constructor(
         val id = effectCombo?.selectedItem as? String ?: currentDraft().effectId
         val intensity = intensitySlider?.value?.toScale() ?: currentDraft().intensity
         val speed = speedSlider?.value?.toScale() ?: currentDraft().speed
-        target.configure(id, intensity, speed)
+        val state = currentDraft().copy(speed = speed, reduceMotion = reduceMotionCheckBox?.isSelected ?: currentDraft().reduceMotion)
+        target.configure(id, intensity, state.effectiveSpeed(), state.reduceMotion)
     }
 
     override fun isModified(): Boolean = panel?.let {
@@ -234,6 +240,7 @@ class AtmosphereSettingsConfigurable internal constructor(
         draft = settings.state.normalized().deepCopy()
         draftEnabled = readEnabled()
         currentPanel.reset()
+        updatePreview()
     }
 
     override fun disposeUIResources() {
@@ -244,6 +251,7 @@ class AtmosphereSettingsConfigurable internal constructor(
         effectCombo = null
         intensitySlider = null
         speedSlider = null
+        reduceMotionCheckBox = null
         preview = null
     }
 }

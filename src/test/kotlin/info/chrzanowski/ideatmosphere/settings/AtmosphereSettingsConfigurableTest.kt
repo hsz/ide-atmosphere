@@ -3,6 +3,7 @@ package info.chrzanowski.ideatmosphere.settings
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.ui.SimpleColoredComponent
 import info.chrzanowski.ideatmosphere.AtmosphereBundle
+import info.chrzanowski.ideatmosphere.RecordingEffect
 import info.chrzanowski.ideatmosphere.core.AtmosphereEvent
 import info.chrzanowski.ideatmosphere.core.PointerMode
 import info.chrzanowski.ideatmosphere.effects.AtmosphereEffects
@@ -28,6 +29,7 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
     private var applyCalls = 0
     private val committedStates = mutableListOf<AtmosphereSettingsState.State>()
     private val previews = mutableListOf<AtmosphereEvent>()
+    private val previewEffects = mutableListOf<RecordingEffect>()
 
     override fun setUp() {
         super.setUp()
@@ -36,6 +38,7 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
         applyCalls = 0
         committedStates.clear()
         previews.clear()
+        previewEffects.clear()
         configurable = AtmosphereSettingsConfigurable(
             settings = settings,
             readEnabled = { enabled },
@@ -45,6 +48,9 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
                 committedStates += settings.state.deepCopy()
             },
             previewOutcome = { previews += it },
+            previewFactory = {
+                AtmospherePreviewPanel { id -> RecordingEffect(id).also { previewEffects += it } }
+            },
         )
         component = configurable.createComponent()
     }
@@ -118,6 +124,59 @@ class AtmosphereSettingsConfigurableTest : BasePlatformTestCase() {
         preview.removeNotify()
         assertFalse(preview.isAnimating)
         assertNull(preview.effect)
+    }
+
+    fun `test live preview honors saved reduce motion as soon as settings opens`() {
+        settings.loadState(AtmosphereSettingsState.State(speed = 1.7f, reduceMotion = true))
+        configurable.disposeUIResources()
+        component = configurable.createComponent()
+        val preview = checkNotNull(configurable.preview)
+        preview.addNotify()
+        try {
+            val effect = previewEffects.single()
+            assertEquals(AtmosphereSettingsState.REDUCED_MOTION_SPEED, effect.lastSpeedScale)
+            assertEquals(100, preview.intervalMillis)
+            preview.setSize(420, 120)
+            preview.tick()
+            assertEquals(0.1f, effect.deltas.single())
+            assertFalse(configurable.isModified())
+        } finally {
+            preview.removeNotify()
+        }
+    }
+
+    fun `test live preview follows drafted reduce motion and reset without restarting`() {
+        val preview = checkNotNull(configurable.preview)
+        preview.addNotify()
+        try {
+            val effect = previewEffects.single()
+            slider("speed").value = 200
+            checkBox("reduceMotion").isSelected = true
+            assertEquals(AtmosphereSettingsState.REDUCED_MOTION_SPEED, effect.lastSpeedScale)
+            assertEquals(100, preview.intervalMillis)
+            slider("speed").value = 150
+            assertEquals(AtmosphereSettingsState.REDUCED_MOTION_SPEED, effect.lastSpeedScale)
+            assertFalse(settings.state.reduceMotion)
+            assertEquals(0, applyCalls)
+
+            checkBox("reduceMotion").isSelected = false
+            assertEquals(1.5f, effect.lastSpeedScale)
+            assertEquals(40, preview.intervalMillis)
+
+            checkBox("reduceMotion").isSelected = true
+            configurable.apply()
+            assertEquals(AtmosphereSettingsState.REDUCED_MOTION_SPEED, effect.lastSpeedScale)
+            assertEquals(100, preview.intervalMillis)
+            checkBox("reduceMotion").isSelected = false
+            configurable.reset()
+            assertEquals(AtmosphereSettingsState.REDUCED_MOTION_SPEED, effect.lastSpeedScale)
+            assertEquals(100, preview.intervalMillis)
+            assertEquals(1, effect.startCount)
+            assertSame(effect, preview.effect)
+            assertFalse(configurable.isModified())
+        } finally {
+            preview.removeNotify()
+        }
     }
 
     fun `test controls edit a draft including enabled until Apply`() {

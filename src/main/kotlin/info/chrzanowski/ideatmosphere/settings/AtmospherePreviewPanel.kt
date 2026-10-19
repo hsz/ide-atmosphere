@@ -50,10 +50,12 @@ class AtmospherePreviewPanel(
         minimumSize = Dimension(JBUI.scale(120), JBUI.scale(60))
     }
 
-    /** Shows [id] with [intensity] and [speed]; restarts the effect only when the atmosphere itself changes. */
-    fun configure(id: String, intensity: Float, speed: Float) {
+    /** Shows [id] with [intensity] and effective [speed]; Reduce Motion caps the timer at 10 FPS. */
+    fun configure(id: String, intensity: Float, speed: Float, reduceMotion: Boolean = false) {
         this.intensity = intensity
         this.speed = speed
+        timer.delay = if (reduceMotion) REDUCED_TICK_MILLIS else TICK_MILLIS
+        timer.initialDelay = timer.delay
         if (id != effectId) {
             effectId = id
             if (effect != null) restart()
@@ -63,6 +65,9 @@ class AtmospherePreviewPanel(
 
     /** `true` while the preview animates. */
     val isAnimating: Boolean get() = timer.isRunning
+
+    /** Effective timer delay in milliseconds. */
+    internal val intervalMillis: Int get() = timer.delay
 
     override fun addNotify() {
         super.addNotify()
@@ -96,7 +101,7 @@ class AtmospherePreviewPanel(
     internal fun tick() {
         val current = effect ?: return
         val now = System.nanoTime()
-        val dt = if (lastTickNanos == 0L) TICK_MILLIS / 1000f else ((now - lastTickNanos) / 1e9f).coerceAtMost(MAX_DT)
+        val dt = if (lastTickNanos == 0L) intervalMillis / 1000f else ((now - lastTickNanos) / 1e9f).coerceAtMost(MAX_DT)
         lastTickNanos = now
         val insets = insets
         bounds.setBounds(0, 0, width - insets.left - insets.right, height - insets.top - insets.bottom)
@@ -123,6 +128,7 @@ class AtmospherePreviewPanel(
 
     companion object {
         private const val TICK_MILLIS = 40
+        private const val REDUCED_TICK_MILLIS = 100
         private const val MAX_DT = 0.1f
         private const val PREFERRED_WIDTH = 420
         private const val PREFERRED_HEIGHT = 120
